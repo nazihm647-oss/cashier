@@ -11,7 +11,6 @@
   button{cursor:pointer;font-family:'Cairo',sans-serif}
   input,select,textarea{font-family:'Cairo',sans-serif}
 
-  /* ===== Loading / Fatal screens ===== */
   #loadingScreen{position:fixed;inset:0;background:#145c30;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:99999;gap:16px}
   .spinner{width:54px;height:54px;border:6px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -20,7 +19,6 @@
   .fatal-box code{display:block;background:#15181f;color:#ffb3b3;padding:10px;border-radius:8px;margin:14px 0;direction:ltr;text-align:left;font-size:12px;white-space:pre-wrap}
   .fatal-box button{margin-top:10px;background:#1e8e4a;border:none;color:#fff;padding:10px 24px;border-radius:8px;font-weight:700}
 
-  /* ===== Login ===== */
   #loginScreen{position:fixed;inset:0;background:linear-gradient(135deg,#1e8e4a,#0f4a24);display:none;align-items:center;justify-content:center}
   .login-box{background:#fff;border-radius:18px;padding:36px 30px;width:92%;max-width:360px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25)}
   .login-logo-icon{width:70px;height:70px;background:#eafaf0;border:3px solid #1e8e4a;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 10px}
@@ -31,7 +29,6 @@
   .login-box button{width:100%;padding:12px;background:#1e8e4a;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:15px}
   .login-error{color:#e74c3c;font-size:13px;margin-bottom:10px;display:none}
 
-  /* ===== Top bar ===== */
   .topbar{background:linear-gradient(135deg,#1e8e4a,#145c30);color:#fff;padding:12px 18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;box-shadow:0 4px 12px rgba(0,0,0,.15);position:sticky;top:0;z-index:500}
   .logo{display:flex;align-items:center;gap:10px}
   .logo-icon{width:44px;height:44px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
@@ -49,7 +46,6 @@
   #connStatus.online{background:#dff5e4;color:#1e8e4a}
   #connStatus.offline{background:#fde4e4;color:#e74c3c}
 
-  /* ===== Layout ===== */
   .content{padding:18px}
   .tab-panel{display:none}
   .tab-panel.active{display:block}
@@ -97,17 +93,16 @@
 
   .warn-banner{background:#fdf0d5;color:#8a6500;padding:10px 14px;border-radius:10px;margin-bottom:14px;font-size:13px;font-weight:700}
 
-  /* ===== Modal ===== */
   #modalOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center;padding:14px}
-  #modalBox{background:#fff;border-radius:14px;padding:22px;max-width:480px;width:100%;max-height:88vh;overflow-y:auto}
+  #modalBox{background:#fff;border-radius:14px;padding:22px;max-width:480px;width:100%;max-height:88vh;overflow-y:auto;position:relative}
   #modalBox h3{color:#145c30;margin-bottom:14px;font-size:16px}
+  .modal-x-close{position:absolute;top:10px;left:14px;cursor:pointer;font-size:18px;color:#888;font-weight:900}
   .form-group{margin-bottom:12px;display:flex;flex-direction:column;gap:5px}
   .form-group label{font-size:12px;color:#5a715f;font-weight:700}
   .form-group .with-btn{display:flex;gap:6px}
   .form-group .with-btn input{flex:1}
   .modal-actions{display:flex;gap:8px;margin-top:16px}
 
-  /* ===== Scanner ===== */
   #scannerOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;align-items:center;justify-content:center}
   #scannerBox{background:#fff;border-radius:14px;padding:18px;max-width:420px;width:92%;text-align:center}
   #scannerBox h3{color:#145c30;margin-bottom:6px;font-size:15px}
@@ -125,26 +120,23 @@
 </head>
 <body>
 
-<!-- ===== Loading Screen ===== -->
 <div id="loadingScreen">
   <div class="spinner"></div>
   <div>جاري تحميل نظام زين ماركت...</div>
 </div>
 
-<!-- ===== Fatal Error Screen ===== -->
 <div id="fatalErrorScreen">
   <div class="fatal-box">
     <h2>⚠️ تعذر تحميل النظام</h2>
     <p style="margin-top:10px;font-size:13px">
-      ده ممكن يحصل لو الموقع بيتفتح من برنامج أو متصفح مقيد (زي فتح الملف من تطبيق تانٍ)، أو لو مفيش اتصال بالإنترنت.
-      افتح الرابط ده مباشرة من متصفح Chrome عادي والتأكد من اتصال الإنترنت.
+      ده ممكن يحصل لو الموقع بيتفتح من برنامج أو متصفح مقيد، أو لو مفيش اتصال بالإنترنت.
+      افتح الرابط من متصفح Chrome عادي والتأكد من اتصال الإنترنت.
     </p>
     <code id="fatalErrorDetails"></code>
     <button onclick="location.reload()">🔄 إعادة المحاولة</button>
   </div>
 </div>
 
-<!-- ===== Login Screen ===== -->
 <div id="loginScreen">
   <div class="login-box">
     <div class="login-logo-icon">🛒</div>
@@ -157,7 +149,6 @@
   </div>
 </div>
 
-<!-- ===== App Screen ===== -->
 <div id="appScreen" style="display:none">
   <div class="topbar">
     <div class="logo">
@@ -185,10 +176,13 @@
   </div>
 </div>
 
-<!-- ===== Modal ===== -->
-<div id="modalOverlay"><div id="modalBox"></div></div>
+<div id="modalOverlay" onclick="if(event.target===this){ closeModal(); }">
+  <div id="modalBox">
+    <span class="modal-x-close" onclick="closeModal()">✖</span>
+    <div id="modalInner"></div>
+  </div>
+</div>
 
-<!-- ===== Scanner ===== -->
 <div id="scannerOverlay">
   <div id="scannerBox">
     <h3>📷 وجّه الكاميرا نحو الباركود</h3>
@@ -197,16 +191,24 @@
   </div>
 </div>
 
-<!-- ===== Hidden Print Area ===== -->
 <div id="printArea" style="display:none"></div>
 
 <script>
-/* ============ Global Error Handler ============ */
+/* ============ Global Error Handler (مع إغلاق أي نافذة عالقة تلقائيًا) ============ */
 window.onerror = function(message, source, lineno, colno, error){
   try{
+    var overlay = document.getElementById('modalOverlay'); if(overlay) overlay.style.display = 'none';
+    var scannerOv = document.getElementById('scannerOverlay'); if(scannerOv) scannerOv.style.display = 'none';
+    if(window.html5QrCode){ try{ html5QrCode.stop().catch(function(){}); }catch(e){} html5QrCode = null; }
+
     var box = document.createElement('div');
     box.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#e74c3c;color:#fff;padding:15px;font-size:13px;z-index:999999;direction:ltr;text-align:left;white-space:pre-wrap;font-family:monospace;';
-    box.textContent = '⚠️ JS Error: ' + message + ' | Line: ' + lineno + ' Col: ' + colno;
+    box.textContent = '⚠️ JS Error: ' + message + ' | Line: ' + lineno + ' Col: ' + colno + '  ';
+    var closeBtn = document.createElement('span');
+    closeBtn.textContent = '[إغلاق]';
+    closeBtn.style.cssText = 'cursor:pointer;text-decoration:underline;margin-right:10px;';
+    closeBtn.onclick = function(){ box.remove(); };
+    box.appendChild(closeBtn);
     document.body.appendChild(box);
   }catch(e){}
   return false;
@@ -383,7 +385,14 @@ function doLogin(){
   sessionStorage.setItem('current_user', JSON.stringify(user));
   showApp();
 }
-function doLogout(){ sessionStorage.removeItem('current_user'); location.reload(); }
+function doLogout(){
+  try{
+    closeModal();
+    closeBarcodeScanner();
+    sessionStorage.removeItem('current_user');
+  }catch(e){}
+  window.location.replace(window.location.pathname + window.location.search);
+}
 
 var currentTab = 'cashier';
 var cart = [];
@@ -410,6 +419,7 @@ function renderNav(){
 }
 function switchTab(tab){
   closeBarcodeScanner();
+  closeModal();
   currentTab = tab;
   Object.keys(TAB_META).forEach(function(t){
     var panel = document.getElementById('tab-'+t);
@@ -436,10 +446,13 @@ function refreshCurrentView(){
 function fmtMoney(n){ return (parseFloat(n)||0).toFixed(2) + ' ج.م'; }
 function fmtDate(iso){ try{ return new Date(iso).toLocaleString('ar-EG'); }catch(e){ return iso; } }
 function showModal(html){
-  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('modalInner').innerHTML = html;
   document.getElementById('modalOverlay').style.display = 'flex';
 }
-function closeModal(){ document.getElementById('modalOverlay').style.display = 'none'; }
+function closeModal(){
+  var overlay = document.getElementById('modalOverlay');
+  if(overlay) overlay.style.display = 'none';
+}
 
 /* ============ Barcode Scanner ============ */
 var html5QrCode = null;
@@ -479,7 +492,8 @@ function openBarcodeScanner(onResult){
   });
 }
 function closeBarcodeScanner(){
-  document.getElementById('scannerOverlay').style.display = 'none';
+  var overlay = document.getElementById('scannerOverlay');
+  if(overlay) overlay.style.display = 'none';
   if(html5QrCode){
     var ref = html5QrCode; html5QrCode = null;
     ref.stop().then(function(){ try{ ref.clear(); }catch(e){} }).catch(function(){});
@@ -544,6 +558,7 @@ function getActiveShift(username){
   return getShifts().find(function(s){ return s.cashierName === username && !s.closed; });
 }
 function calcShiftStats(shift){
+  if(!shift) return {cashSalesTotal:0, walletCashTotal:0, expensesTotal:0, expected:0};
   var sales = getSales().filter(function(s){ return s.soldBy===shift.cashierName && new Date(s.date) >= new Date(shift.startTime); });
   var cashSalesTotal = sales.filter(function(s){ return s.paymentMethod==='cash'; }).reduce(function(a,s){ return a+s.total; },0);
   var walletCashTotal = getWalletTransactions().filter(function(w){ return w.user===shift.cashierName && new Date(w.date) >= new Date(shift.startTime); }).reduce(function(a,w){ return a + (w.cashEffect||0); },0);
@@ -555,30 +570,46 @@ function startShiftPrompt(){
   showModal('<h3>🕐 بدء شيفت جديد</h3><div class="form-group"><label>المبلغ الافتتاحي في الدرج</label><input type="number" id="shiftOpenAmt" placeholder="0"></div><div class="modal-actions"><button class="btn" onclick="confirmStartShift()">بدء الشيفت</button><button class="btn btn-secondary" onclick="closeModal()">إلغاء</button></div>');
 }
 function confirmStartShift(){
-  var amt = parseFloat(document.getElementById('shiftOpenAmt').value) || 0;
-  var user = getCurrentUser();
-  var shifts = getShifts();
-  shifts.push({id:genId(), cashierName:user.username, openingAmount:amt, startTime:new Date().toISOString(), endTime:null, closingAmount:null, closed:false, expectedAmount:null, difference:null});
-  saveShifts(shifts); closeModal(); renderCashier();
+  try{
+    var amt = parseFloat(document.getElementById('shiftOpenAmt').value) || 0;
+    var user = getCurrentUser();
+    var shifts = getShifts();
+    shifts.push({id:genId(), cashierName:user.username, openingAmount:amt, startTime:new Date().toISOString(), endTime:null, closingAmount:null, closed:false, expectedAmount:null, difference:null});
+    saveShifts(shifts); closeModal(); renderCashier();
+  }catch(e){ alert('حدث خطأ أثناء بدء الشيفت، حاول مرة أخرى'); closeModal(); }
 }
 function endShiftPrompt(){
   var user = getCurrentUser();
   var shift = getActiveShift(user.username);
-  if(!shift) return;
+  if(!shift){ alert('لا يوجد شيفت نشط حاليًا'); return; }
   var stats = calcShiftStats(shift);
   showModal('<h3>🔚 إنهاء الشيفت</h3><p style="font-size:13px;margin-bottom:10px">المبلغ المتوقع في الدرج: <b>'+fmtMoney(stats.expected)+'</b></p><div class="form-group"><label>المبلغ الفعلي بعد العد</label><input type="number" id="shiftCloseAmt" placeholder="0"></div><div class="modal-actions"><button class="btn" onclick="confirmEndShift(\''+shift.id+'\')">إنهاء</button><button class="btn btn-secondary" onclick="closeModal()">إلغاء</button></div>');
 }
 function confirmEndShift(shiftId){
-  var actual = parseFloat(document.getElementById('shiftCloseAmt').value) || 0;
-  var shifts = getShifts();
-  var shift = shifts.find(function(s){ return s.id===shiftId; });
-  var stats = calcShiftStats(shift);
-  shift.closed = true;
-  shift.endTime = new Date().toISOString();
-  shift.closingAmount = actual;
-  shift.expectedAmount = stats.expected;
-  shift.difference = actual - stats.expected;
-  saveShifts(shifts); closeModal(); renderCashier();
+  try{
+    var actual = parseFloat(document.getElementById('shiftCloseAmt').value) || 0;
+    var shifts = getShifts();
+    var shift = shifts.find(function(s){ return s.id===shiftId; });
+    if(!shift){
+      alert('تعذر العثور على بيانات الشيفت، حاول الضغط على "إنهاء الشيفت" مرة أخرى من الصفحة الرئيسية');
+      closeModal();
+      renderCashier();
+      return;
+    }
+    var stats = calcShiftStats(shift);
+    shift.closed = true;
+    shift.endTime = new Date().toISOString();
+    shift.closingAmount = actual;
+    shift.expectedAmount = stats.expected;
+    shift.difference = actual - stats.expected;
+    saveShifts(shifts);
+    closeModal();
+    renderCashier();
+  }catch(e){
+    alert('حدث خطأ أثناء إنهاء الشيفت: ' + e.message);
+    closeModal();
+    renderCashier();
+  }
 }
 
 function renderCashier(){
@@ -883,7 +914,7 @@ function applyPurchaseStock(purchase){
   saveProducts(products);
 }
 function buildInstallments(purchase){
-  var n = 3; // تقسيم افتراضي على 3 دفعات، يمكن تعديله لاحقًا
+  var n = 3;
   var per = Math.floor((purchase.total/n)*100)/100;
   var installments = [];
   var sum = 0;
@@ -1051,12 +1082,12 @@ function submitWalletTx(){
   var wallets = getWallets();
   var cashEffect = 0, walletEffect = 0;
   if(operation==='withdraw'){
-    wallets[walletType] = (wallets[walletType]||0) + amount + commission; // شحن المحفظة
-    cashEffect = -amount; // الكاش خرج من الدرج للعميل
+    wallets[walletType] = (wallets[walletType]||0) + amount + commission;
+    cashEffect = -amount;
     walletEffect = amount + commission;
   } else {
     wallets[walletType] = (wallets[walletType]||0) - amount;
-    cashEffect = amount; // كاش دخل الدرج
+    cashEffect = amount;
     walletEffect = -amount;
   }
   saveWallets(wallets);
