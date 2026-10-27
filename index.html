@@ -1155,4 +1155,58 @@ function renderUsers(){
   var users = getUsers();
   var rows = users.map(function(u){
     return '<tr><td>'+u.displayName+'</td><td>'+(u.role==='admin'?'مدير':'كاشير')+'</td><td>'+
-    '<button class="btn-xs" onclick="openChangePasswordModal(\''+u.id+'\')">🔑 
+    '<button class="btn-xs" onclick="openChangePasswordModal(\''+u.id+'\')">🔑 تغيير كلمة المرور</button> '+
+    (u.id!==CURRENT_USER.id? '<button class="btn-xs btn-danger" onclick="deleteUser(\''+u.id+'\')">🗑️ حذف</button>':'')+
+    '</td></tr>';
+  }).join('');
+  document.getElementById('tabContent').innerHTML = '<div class="row-flex"><h2>👥 إدارة المستخدمين</h2><button class="btn btn-primary" onclick="openAddUserModal()">+ إضافة مستخدم</button></div>'+
+  '<table class="data-table"><thead><tr><th>الاسم</th><th>الصلاحية</th><th>إجراءات</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+function openAddUserModal(){
+  showModal('<h3>إضافة مستخدم</h3><label>الاسم</label><input id="newUserName"><label>كلمة المرور</label><input id="newUserPass"><label>الصلاحية</label><select id="newUserRole"><option value="cashier">كاشير</option><option value="admin">مدير</option></select><button class="btn btn-primary" onclick="submitAddUser()">حفظ</button>');
+}
+function submitAddUser(){
+  var name = document.getElementById('newUserName').value.trim();
+  var pass = document.getElementById('newUserPass').value;
+  var role = document.getElementById('newUserRole').value;
+  if(!name||!pass){ alert('أدخل بيانات صحيحة'); return; }
+  var users = getUsers();
+  if(users.find(function(u){return u.username===name;})){ alert('يوجد مستخدم بهذا الاسم بالفعل'); return; }
+  users.push({id:genId('user'), username:name, password:pass, role:role, displayName:name});
+  saveUsers(users);
+  closeModal();
+  renderUsers();
+}
+function deleteUser(id){
+  if(!confirm('هل أنت متأكد من حذف هذا المستخدم؟')) return;
+  var users = getUsers().filter(function(u){return u.id!==id;});
+  saveUsers(users);
+  renderUsers();
+}
+function openChangePasswordModal(userId){
+  showModal('<h3>تغيير كلمة المرور</h3><label>كلمة المرور الجديدة</label><input id="newPassVal"><button class="btn btn-primary" onclick="submitChangePassword(\''+userId+'\')">حفظ</button>');
+}
+function submitChangePassword(userId){
+  var val = document.getElementById('newPassVal').value;
+  if(!val){ alert('أدخل كلمة مرور'); return; }
+  var users = getUsers();
+  var u = users.find(function(x){return x.id===userId;});
+  if(!u){ alert('تعذر العثور على المستخدم'); return; }
+  u.password = val;
+  saveUsers(users);
+  closeModal();
+  alert('تم تغيير كلمة المرور بنجاح');
+}
+
+/* ========== RESET (admin only) ========== */
+function resetAllData(){
+  if(CURRENT_USER.role!=='admin'){ alert('غير مسموح'); return; }
+  if(!confirm('هل أنت متأكد تماماً؟ سيتم حذف كل البيانات من جميع الأجهزة نهائياً!')) return;
+  if(!confirm('تأكيد أخير: لا يمكن التراجع عن هذا الإجراء. متابعة؟')) return;
+  var batch = db.batch();
+  SYNC_KEYS.forEach(function(key){ batch.delete(db.collection('cashier_data').doc(key)); });
+  batch.commit().then(function(){ alert('تم حذف جميع البيانات'); window.location.reload(); });
+}
+</script>
+</body>
+</html>
