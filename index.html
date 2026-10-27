@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>زين ماركت - نظام الكاشير</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
@@ -50,7 +53,7 @@ body{margin:0;font-family:'Cairo',sans-serif;background:var(--bg);color:#222;}
 .product-card{background:#fff;border-radius:10px;padding:10px;text-align:center;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.08);border:2px solid transparent;transition:.15s;}
 .product-card:hover{border-color:var(--primary);transform:translateY(-2px);}
 .product-card.low-stock{border-color:var(--warning);}
-.product-card.out-stock{opacity:.5;pointer-events:none;border-color:var(--danger);}
+.product-card.out-stock{opacity:.5;border-color:var(--danger);}
 @media(max-width:860px){
   .cashier-split{flex-direction:column;}
   .cashier-cart-panel{position:static;max-height:none;width:100%;}
@@ -136,6 +139,9 @@ input,select{width:100%;padding:8px;border:1px solid #ddd;border-radius:8px;marg
 </div>
 
 <script>
+/* BUILD VERSION: 3 */
+var APP_BUILD = 3;
+
 /* ============ CONFIG ============ */
 var firebaseConfig = {
   apiKey: "AIzaSyDIp3OlRAP0Wa7Ea1W87NZkYAwOe0xueSQ",
@@ -206,11 +212,16 @@ async function bootApp(){
 
     var _loadedKeys = {};
     function allLoaded(){ return SYNC_KEYS.every(function(k){ return _loadedKeys[k]; }); }
+    function defaultForKey(key){
+      if(key==='cashier_wallets') return {vodafone:0, instapay:0};
+      if(key.indexOf('counter')>=0) return 0;
+      return [];
+    }
     SYNC_KEYS.forEach(function(key){
       db.collection('cashier_data').doc(key).onSnapshot(function(doc){
-        _dataCache[key] = doc.exists ? doc.data().value : (key.indexOf('counter')>=0 ? 0 : []);
+        _dataCache[key] = doc.exists ? doc.data().value : defaultForKey(key);
         _loadedKeys[key] = true;
-        var cs = document.getElementById('connStatus'); if(cs) cs.textContent = '🟢 متصل';
+        var cs = document.getElementById('connStatus'); if(cs) cs.textContent = '🟢 متصل (نسخة '+APP_BUILD+')';
         if(allLoaded() && !_appStarted){ _appStarted = true; startApp(); }
         else if(_appStarted){ refreshCurrentView(); }
       }, function(err){
@@ -245,16 +256,21 @@ function nextCounter(name, cb){
 }
 function genId(){ return Date.now().toString(36) + Math.random().toString(36).substr(2,6); }
 
-function getUsers(){ return _dataCache['cashier_users']||[]; } function saveUsers(v){ save('cashier_users',v); }
-function getProducts(){ return _dataCache['cashier_products']||[]; } function saveProducts(v){ save('cashier_products',v); }
-function getSales(){ return _dataCache['cashier_sales']||[]; } function saveSales(v){ save('cashier_sales',v); }
-function getPurchases(){ return _dataCache['cashier_purchases']||[]; } function savePurchases(v){ save('cashier_purchases',v); }
-function getSuppliers(){ return _dataCache['cashier_suppliers']||[]; } function saveSuppliers(v){ save('cashier_suppliers',v); }
-function getDisbursements(){ return _dataCache['cashier_disbursements']||[]; } function saveDisbursements(v){ save('cashier_disbursements',v); }
-function getShifts(){ return _dataCache['cashier_shifts']||[]; } function saveShifts(v){ save('cashier_shifts',v); }
-function getStockAdjustments(){ return _dataCache['cashier_stock_adjustments']||[]; } function saveStockAdjustments(v){ save('cashier_stock_adjustments',v); }
-function getWallets(){ return _dataCache['cashier_wallets']||{vodafone:0,instapay:0}; } function saveWallets(v){ save('cashier_wallets',v); }
-function getWalletTransactions(){ return _dataCache['cashier_wallet_transactions']||[]; } function saveWalletTransactions(v){ save('cashier_wallet_transactions',v); }
+function getUsers(){ return (_dataCache['cashier_users']||[]).slice(); } function saveUsers(v){ save('cashier_users',v); }
+function getProducts(){ return (_dataCache['cashier_products']||[]).slice(); } function saveProducts(v){ save('cashier_products',v); }
+function getSales(){ return (_dataCache['cashier_sales']||[]).slice(); } function saveSales(v){ save('cashier_sales',v); }
+function getPurchases(){ return (_dataCache['cashier_purchases']||[]).slice(); } function savePurchases(v){ save('cashier_purchases',v); }
+function getSuppliers(){ return (_dataCache['cashier_suppliers']||[]).slice(); } function saveSuppliers(v){ save('cashier_suppliers',v); }
+function getDisbursements(){ return (_dataCache['cashier_disbursements']||[]).slice(); } function saveDisbursements(v){ save('cashier_disbursements',v); }
+function getShifts(){ return (_dataCache['cashier_shifts']||[]).slice(); } function saveShifts(v){ save('cashier_shifts',v); }
+function getStockAdjustments(){ return (_dataCache['cashier_stock_adjustments']||[]).slice(); } function saveStockAdjustments(v){ save('cashier_stock_adjustments',v); }
+function getWallets(){
+  var w = _dataCache['cashier_wallets'];
+  if(!w || Array.isArray(w)) return {vodafone:0, instapay:0};
+  return w;
+}
+function saveWallets(v){ save('cashier_wallets',v); }
+function getWalletTransactions(){ return (_dataCache['cashier_wallet_transactions']||[]).slice(); } function saveWalletTransactions(v){ save('cashier_wallet_transactions',v); }
 
 function seedData(){
   if(!_dataCache['cashier_users'] || _dataCache['cashier_users'].length===0){
@@ -263,7 +279,8 @@ function seedData(){
       {id:'2', username:'ABDALLAH', password:'cashier123', role:'cashier', displayName:'ABDALLAH'}
     ]);
   }
-  if(!_dataCache['cashier_wallets']) save('cashier_wallets', {vodafone:0, instapay:0});
+  var w = _dataCache['cashier_wallets'];
+  if(!w || Array.isArray(w)) save('cashier_wallets', {vodafone:0, instapay:0});
   ['cashier_products','cashier_sales','cashier_purchases','cashier_suppliers','cashier_disbursements','cashier_shifts','cashier_stock_adjustments','cashier_wallet_transactions'].forEach(function(k){
     if(!_dataCache[k]) save(k, []);
   });
@@ -377,12 +394,17 @@ function renderTopbar(){
   var html = '<div class="topbar">'+
     '<div class="logo-wrap"><div class="logo-icon">🛒</div><div class="logo-text"><h1>زين ماركت</h1><span>نظام إدارة الكاشير</span></div></div>'+
     '<div style="display:flex;align-items:center;gap:12px">'+
-    '<span id="connStatus" style="font-size:12px">🟢 متصل</span>'+
+    '<span id="connStatus" style="font-size:11px">🟢 متصل (نسخة '+APP_BUILD+')</span>'+
+    '<button class="btn btn-sm" onclick="manualRefresh()">🔄</button>'+
     '<span style="cursor:pointer;position:relative" onclick="openStockAlertsModal()">🔔'+(lowCount>0?'<span class="badge-count">'+lowCount+'</span>':'')+'</span>'+
     '<span>'+CURRENT_USER.displayName+'</span>'+
     '<button class="btn btn-sm" onclick="doLogout()">🚪 خروج</button>'+
     '</div></div>';
   document.getElementById('topbarWrap').innerHTML = html;
+}
+function manualRefresh(){
+  renderTopbar();
+  renderActiveTab();
 }
 function openStockAlertsModal(){
   var low = getProducts().filter(function(p){ return p.stock<=(p.minStock||5); });
@@ -444,7 +466,7 @@ function renderCashier(){
   } else {
     var stats = calcShiftStats(shift);
     html += '<div class="banner info"><span>🕐 شيفت '+shift.cashierName+' - بدأ '+formatDate(shift.startTime)+' | المبلغ الافتتاحي: '+shift.openingAmount+' ج | المتوقع بالدرج الآن: '+stats.expected.toFixed(2)+' ج</span>'+
-      '<button class="btn btn-sm btn-danger" onclick="openEndShiftModal(\''+shift.id+'\')">⏹️ إنهاء الشيفت</button></div>';
+      '<button class="btn btn-sm btn-danger" onclick="openEndShiftModal()">⏹️ إنهاء الشيفت</button></div>';
   }
   html += '<div class="cashier-split">';
   html += '<div class="cashier-cart-panel" id="cartPanel"></div>';
@@ -473,18 +495,24 @@ function renderProductGrid(){
   document.getElementById('productGrid').innerHTML = html || '<p>لا توجد منتجات مطابقة</p>';
 }
 function addToCart(productId){
-  var shift = getActiveShift();
-  if(!shift){ alert('يجب بدء شيفت أولاً قبل البيع'); return; }
-  var product = getProducts().find(function(p){ return p.id===productId; });
-  if(!product || product.stock<=0){ alert('المنتج غير متاح في المخزون'); return; }
-  var line = CART.find(function(c){ return c.productId===productId; });
-  if(line){
-    if(line.qty+1 > product.stock){ alert('الكمية المتاحة في المخزون غير كافية'); return; }
-    line.qty++;
-  } else {
-    CART.push({productId:productId, name:product.name, price:product.price, qty:1});
+  try{
+    var shift = getActiveShift();
+    if(!shift){ alert('يجب بدء شيفت أولاً قبل البيع'); return; }
+    var products = getProducts();
+    var product = products.find(function(p){ return p.id===productId; });
+    if(!product){ alert('تعذر العثور على هذا المنتج، حاول الضغط على 🔄 لتحديث البيانات ثم المحاولة مرة أخرى'); return; }
+    if(product.stock<=0){ alert('المنتج "'+product.name+'" نفذ من المخزون حالياً'); return; }
+    var line = CART.find(function(c){ return c.productId===productId; });
+    if(line){
+      if(line.qty+1 > product.stock){ alert('الكمية المطلوبة ('+(line.qty+1)+') أكبر من المتاح بالمخزون ('+product.stock+')'); return; }
+      line.qty++;
+    } else {
+      CART.push({productId:productId, name:product.name, price:product.price, qty:1});
+    }
+    renderCartPanelInto();
+  }catch(e){
+    alert('حدث خطأ أثناء الإضافة للسلة: ' + e.message);
   }
-  renderCartPanelInto();
 }
 function changeCartQty(i, delta){
   var c = CART[i]; if(!c) return;
@@ -532,41 +560,49 @@ function updateCartTotals(){
   document.getElementById('cartTotalDisp').textContent = total.toFixed(2);
 }
 function processCheckout(){
-  var shift = getActiveShift();
-  if(!shift){ alert('يجب بدء شيفت أولاً'); return; }
-  if(CART.length===0){ alert('السلة فارغة'); return; }
-  var discountPercent = parseFloat(document.getElementById('cartDiscount').value)||0;
-  var taxPercent = parseFloat(document.getElementById('cartTax').value)||0;
-  var paymentMethod = document.getElementById('cartPayment').value;
-  var subtotal = CART.reduce(function(a,c){ return a+c.price*c.qty; },0);
-  var afterDiscount = subtotal - (subtotal*discountPercent/100);
-  var total = afterDiscount + (afterDiscount*taxPercent/100);
-  var cartCopy = CART.slice();
-  nextCounter('invoice_counter', function(num){
-    var sale = {
-      invoiceNum:num, date:new Date().toISOString(), items:cartCopy,
-      subtotal:subtotal, discountPercent:discountPercent, taxPercent:taxPercent, total:total,
-      soldBy:CURRENT_USER.displayName, paymentMethod:paymentMethod
-    };
-    var products = getProducts();
-    cartCopy.forEach(function(c){
-      var p = products.find(function(pp){ return pp.id===c.productId; });
-      if(p) p.stock -= c.qty;
+  try{
+    var shift = getActiveShift();
+    if(!shift){ alert('يجب بدء شيفت أولاً'); return; }
+    if(CART.length===0){ alert('السلة فارغة'); return; }
+    var discountPercent = parseFloat(document.getElementById('cartDiscount').value)||0;
+    var taxPercent = parseFloat(document.getElementById('cartTax').value)||0;
+    var paymentMethod = document.getElementById('cartPayment').value;
+    var subtotal = CART.reduce(function(a,c){ return a+c.price*c.qty; },0);
+    var afterDiscount = subtotal - (subtotal*discountPercent/100);
+    var total = afterDiscount + (afterDiscount*taxPercent/100);
+    var cartCopy = CART.slice();
+    nextCounter('invoice_counter', function(num){
+      try{
+        var sale = {
+          invoiceNum:num, date:new Date().toISOString(), items:cartCopy,
+          subtotal:subtotal, discountPercent:discountPercent, taxPercent:taxPercent, total:total,
+          soldBy:CURRENT_USER.displayName, paymentMethod:paymentMethod
+        };
+        var products = getProducts();
+        cartCopy.forEach(function(c){
+          var p = products.find(function(pp){ return pp.id===c.productId; });
+          if(p) p.stock -= c.qty;
+        });
+        saveProducts(products);
+        var sales = getSales(); sales.push(sale); saveSales(sales);
+        if(paymentMethod==='vodafone' || paymentMethod==='instapay'){
+          var wallets = getWallets();
+          wallets[paymentMethod] = (wallets[paymentMethod]||0) + total;
+          saveWallets(wallets);
+          var txs = getWalletTransactions();
+          txs.push({id:genId(), walletType:paymentMethod, operation:'sale', amount:total, commission:0, phone:'', cashEffect:0, walletEffect:total, date:new Date().toISOString(), user:CURRENT_USER.displayName});
+          saveWalletTransactions(txs);
+        }
+        CART = [];
+        showInvoice(sale);
+        renderCashier();
+      }catch(e){
+        alert('حدث خطأ أثناء إتمام البيع: ' + e.message);
+      }
     });
-    saveProducts(products);
-    var sales = getSales(); sales.push(sale); saveSales(sales);
-    if(paymentMethod==='vodafone' || paymentMethod==='instapay'){
-      var wallets = getWallets();
-      wallets[paymentMethod] = (wallets[paymentMethod]||0) + total;
-      saveWallets(wallets);
-      var txs = getWalletTransactions();
-      txs.push({id:genId(), walletType:paymentMethod, operation:'sale', amount:total, commission:0, phone:'', cashEffect:0, walletEffect:total, date:new Date().toISOString(), user:CURRENT_USER.displayName});
-      saveWalletTransactions(txs);
-    }
-    CART = [];
-    showInvoice(sale);
-    renderCashier();
-  });
+  }catch(e){
+    alert('حدث خطأ: ' + e.message);
+  }
 }
 
 /* ---- Shift management ---- */
@@ -587,10 +623,19 @@ function confirmStartShift(){
     renderCashier();
   }
 }
-function openEndShiftModal(shiftId){
-  var shift = getShifts().find(function(s){ return s.id===shiftId; });
-  var stats = calcShiftStats(shift);
-  showModal('<h3>إنهاء الشيفت</h3><p>المبلغ المتوقع بالدرج: <b>'+stats.expected.toFixed(2)+' ج</b></p><label>المبلغ الفعلي المعدود بالدرج</label><input type="number" id="shiftCloseAmt" value="0"><button class="btn btn-primary" onclick="confirmEndShift(\''+shiftId+'\')">تأكيد الإنهاء</button>');
+/* openEndShiftModal / confirmEndShift now ALWAYS look up the live active shift
+   for the current user at the moment of the click, instead of relying on an id
+   baked into the button HTML at render-time. This prevents "تعذر العثور على الشيفت"
+   errors that could happen if the view re-rendered between render and click. */
+function openEndShiftModal(){
+  try{
+    var shift = getActiveShift();
+    if(!shift){ alert('لا يوجد شيفت مفتوح حالياً لهذا المستخدم. حاول الضغط على 🔄 لتحديث الصفحة'); return; }
+    var stats = calcShiftStats(shift);
+    showModal('<h3>إنهاء الشيفت</h3><p>المبلغ المتوقع بالدرج: <b>'+stats.expected.toFixed(2)+' ج</b></p><label>المبلغ الفعلي المعدود بالدرج</label><input type="number" id="shiftCloseAmt" value="0"><button class="btn btn-primary" onclick="confirmEndShift()">تأكيد الإنهاء</button>');
+  }catch(e){
+    alert('حدث خطأ: ' + e.message);
+  }
 }
 function calcShiftStats(shift){
   if(!shift) return {cashSalesTotal:0, walletCashTotal:0, expensesTotal:0, expected:0};
@@ -601,17 +646,22 @@ function calcShiftStats(shift){
   var expected = (shift.openingAmount||0) + cashSalesTotal - expensesTotal + walletCashTotal;
   return {cashSalesTotal:cashSalesTotal, walletCashTotal:walletCashTotal, expensesTotal:expensesTotal, expected:expected};
 }
-function confirmEndShift(shiftId){
+function confirmEndShift(){
   try{
     var actual = parseFloat(document.getElementById('shiftCloseAmt').value) || 0;
     var shifts = getShifts();
-    var shift = shifts.find(function(s){ return s.id===shiftId; });
-    if(!shift){
-      alert('تعذر العثور على بيانات الشيفت، حاول الضغط على "إنهاء الشيفت" مرة أخرى من الصفحة الرئيسية');
+    // Look up the live active shift for the current user by name, NOT by a stale id.
+    var idx = -1;
+    for(var i=0;i<shifts.length;i++){
+      if(shifts[i].cashierName===CURRENT_USER.displayName && !shifts[i].closed){ idx = i; break; }
+    }
+    if(idx===-1){
+      alert('لا يوجد شيفت مفتوح حالياً. ربما تم إنهاؤه بالفعل من جهاز آخر. اضغط 🔄 لتحديث الصفحة');
       closeModal();
       renderCashier();
       return;
     }
+    var shift = shifts[idx];
     var stats = calcShiftStats(shift);
     shift.closed = true;
     shift.endTime = new Date().toISOString();
