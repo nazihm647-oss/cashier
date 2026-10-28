@@ -132,7 +132,7 @@ label{font-weight:600;font-size:13px;display:block;margin-top:6px;}
 
 <script>
 /* ========== CONFIG ========== */
-var APP_BUILD = 4;
+var APP_BUILD = 5;
 var firebaseConfig = {
   apiKey: "AIzaSyDIp3OlRAP0Wa7Ea1W87NZkYAwOe0xueSQ",
   authDomain: "casheir-840ee.firebaseapp.com",
@@ -141,9 +141,9 @@ var firebaseConfig = {
   messagingSenderId: "1078746217763",
   appId: "1:1078746217763:web:7f74831f502ca1b20be096"
 };
-var SYNC_KEYS = ['cashier_users','cashier_products','cashier_sales','cashier_purchases','cashier_suppliers','cashier_disbursements','cashier_shifts','cashier_stock_adjustments','cashier_wallets','cashier_wallet_transactions','invoice_counter','purchase_counter','wallet_counter'];
+var SYNC_KEYS = ['cashier_users','cashier_products','cashier_sales','cashier_purchases','cashier_suppliers','cashier_disbursements','cashier_shifts','cashier_stock_adjustments','cashier_wallets','cashier_wallet_transactions','cashier_safe','cashier_safe_transactions','invoice_counter','purchase_counter','wallet_counter'];
 var ROLE_PERMISSIONS = {
-  admin: ['cashier','purchases','disbursements','wallets','live','inventory','products','reports','profit','users'],
+  admin: ['cashier','purchases','disbursements','wallets','live','inventory','products','reports','profit','safe','users'],
   cashier: ['cashier','purchases','disbursements','wallets','reports']
 };
 var TAB_DEFS = [
@@ -156,6 +156,7 @@ var TAB_DEFS = [
   {id:'products', label:'🛒 المنتجات'},
   {id:'reports', label:'📊 التقارير'},
   {id:'profit', label:'📈 الأرباح'},
+  {id:'safe', label:'🏦 الخزنة'},
   {id:'users', label:'👥 إدارة المستخدمين'}
 ];
 
@@ -197,6 +198,7 @@ function showFatalError(e){
 }
 function defaultValueFor(key){
   if(key==='cashier_wallets') return {vodafone:0, instapay:0};
+  if(key==='cashier_safe') return {balance:0};
   if(key==='invoice_counter'||key==='purchase_counter'||key==='wallet_counter') return 0;
   return [];
 }
@@ -286,6 +288,14 @@ function getWallets(){
 function saveWallets(v){ save('cashier_wallets', v); }
 function getWalletTransactions(){ return (_dataCache['cashier_wallet_transactions']||[]).slice(); }
 function saveWalletTransactions(v){ save('cashier_wallet_transactions', v); }
+function getSafe(){
+  var s = _dataCache['cashier_safe'];
+  if(!s || Array.isArray(s)) return {balance:0};
+  return s;
+}
+function saveSafe(v){ save('cashier_safe', v); }
+function getSafeTransactions(){ return (_dataCache['cashier_safe_transactions']||[]).slice(); }
+function saveSafeTransactions(v){ save('cashier_safe_transactions', v); }
 
 /* ========== UTIL ========== */
 function formatDate(iso){ if(!iso) return ''; return new Date(iso).toLocaleDateString('ar-EG'); }
@@ -349,7 +359,7 @@ function switchTab(id){
   renderActiveTab();
 }
 function renderActiveTab(){
-  var map = {cashier:renderCashier, purchases:renderPurchases, disbursements:renderDisbursements, wallets:renderWallets, live:renderLive, inventory:renderInventory, products:renderProducts, reports:renderReports, profit:renderProfit, users:renderUsers};
+  var map = {cashier:renderCashier, purchases:renderPurchases, disbursements:renderDisbursements, wallets:renderWallets, live:renderLive, inventory:renderInventory, products:renderProducts, reports:renderReports, profit:renderProfit, safe:renderSafe, users:renderUsers};
   var fn = map[currentTab];
   if(fn) fn();
 }
@@ -430,6 +440,10 @@ function exportWalletsExcel(){
   if(CURRENT_USER.role!=='admin'){ txs = txs.filter(function(t){return t.user===CURRENT_USER.displayName;}); }
   var rows = txs.map(function(t){ return {'التاريخ':formatDateTime(t.date),'المحفظة':t.walletType==='vodafone'?'فودافون كاش':'انستاباي','العملية':opLabel(t.operation),'المبلغ':t.amount,'العمولة':t.commission||0,'المستخدم':t.user}; });
   downloadSheet(rows, 'المحافظ', 'wallets_'+Date.now()+'.xlsx');
+}
+function exportSafeExcel(){
+  var rows = getSafeTransactions().map(function(t){ return {'التاريخ':formatDateTime(t.date),'النوع':t.type==='deposit'?'إيداع يدوي':(t.type==='withdraw'?'سحب يدوي':'صرف معتمد'),'المبلغ':t.amount,'الوصف':t.description||'','بواسطة':t.user}; });
+  downloadSheet(rows, 'الخزنة', 'safe_'+Date.now()+'.xlsx');
 }
 function getProfitBreakdown(sales){
   var map = {};
@@ -877,7 +891,10 @@ function requestInstallmentDisbursement(purchaseId, installmentId){
   disbursements.push(req);
   saveDisbursements(disbursements);
   inst.disbursementRequestId = req.id;
-  if(req.status==='approved'){ inst.paid=true; inst.paidDate=new Date().toISOString(); }
+  if(req.status==='approved'){
+    inst.paid=true; inst.paidDate=new Date().toISOString();
+    applyDisbursementApprovalEffects(req);
+  }
   savePurchases(purchases);
   renderPurchases();
   alert('تم إرسال طلب صرف القسط'+(req.status==='approved'?' وتمت الموافقة تلقائياً':' وبانتظار موافقة MOHAMED NAZIH'));
@@ -903,6 +920,21 @@ function renderPurchases(){
 }
 
 /* ========== DISBURSEMENTS TAB ========== */
+function applyDisbursementApprovalEffects(d){
+  if(d.source==='safe'){
+    var safe = getSafe();
+    safe.balance = (safe.balance||0) - d.amount;
+    saveSafe(safe);
+    var safeTx = getSafeTransactions();
+    safeTx.push({id:genId('safetx'), type:'disbursement', amount:-d.amount, description:d.description, date:new Date().toISOString(), user:d.requestedBy});
+    saveSafeTransactions(safeTx);
+  }
+  if(d.category==='installment' && d.purchaseId){
+    var purchases = getPurchases();
+    var p = purchases.find(function(x){return x.id===d.purchaseId;});
+    if(p){ var inst=p.installments.find(function(i){return i.id===d.installmentId;}); if(inst && !inst.paid){ inst.paid=true; inst.paidDate=new Date().toISOString(); savePurchases(purchases); } }
+  }
+}
 function openNewDisbursementModal(){
   showModal('<h3>طلب صرف جديد</h3><label>الوصف</label><input id="disbDesc"><label>المبلغ</label><input type="number" id="disbAmount" value="0"><label>المصدر</label><select id="disbSource"><option value="drawer">الدرج</option><option value="safe">الخزنة</option></select><button class="btn btn-primary" onclick="submitDisbursement()">إرسال</button>');
 }
@@ -913,8 +945,10 @@ function submitDisbursement(){
     if(!desc||amount<=0){ alert('أدخل بيانات صحيحة'); return; }
     var source = document.getElementById('disbSource').value;
     var disbursements = getDisbursements();
-    disbursements.push({id:genId('disb'), description:desc, amount:amount, source:source, category:'general', purchaseId:null, installmentId:null, requestedBy:CURRENT_USER.displayName, status: CURRENT_USER.role==='admin'?'approved':'pending', approvedBy: CURRENT_USER.role==='admin'?CURRENT_USER.displayName:null, approvedDate: CURRENT_USER.role==='admin'?new Date().toISOString():null, rejectReason:null, date:new Date().toISOString()});
+    var req = {id:genId('disb'), description:desc, amount:amount, source:source, category:'general', purchaseId:null, installmentId:null, requestedBy:CURRENT_USER.displayName, status: CURRENT_USER.role==='admin'?'approved':'pending', approvedBy: CURRENT_USER.role==='admin'?CURRENT_USER.displayName:null, approvedDate: CURRENT_USER.role==='admin'?new Date().toISOString():null, rejectReason:null, date:new Date().toISOString()};
+    disbursements.push(req);
     saveDisbursements(disbursements);
+    if(req.status==='approved'){ applyDisbursementApprovalEffects(req); }
     closeModal();
     renderDisbursements();
   }catch(e){ alert('خطأ: '+e.message); }
@@ -926,11 +960,7 @@ function approveDisbursement(id){
   if(!d) return;
   d.status='approved'; d.approvedBy=CURRENT_USER.displayName; d.approvedDate=new Date().toISOString();
   saveDisbursements(disbursements);
-  if(d.category==='installment' && d.purchaseId){
-    var purchases = getPurchases();
-    var p = purchases.find(function(x){return x.id===d.purchaseId;});
-    if(p){ var inst=p.installments.find(function(i){return i.id===d.installmentId;}); if(inst){ inst.paid=true; inst.paidDate=new Date().toISOString(); } savePurchases(purchases); }
-  }
+  applyDisbursementApprovalEffects(d);
   renderDisbursements();
 }
 function rejectDisbursement(id){
@@ -1010,6 +1040,39 @@ function submitWalletAdjust(){
   saveWallets(wallets);
   closeModal();
   renderWallets();
+}
+
+/* ========== SAFE TAB (admin only) ========== */
+function renderSafe(){
+  if(CURRENT_USER.role!=='admin'){ document.getElementById('tabContent').innerHTML='<p>غير مسموح لك بالدخول لهذه الصفحة</p>'; return; }
+  var safe = getSafe();
+  var txs = getSafeTransactions().slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);});
+  var rows = txs.map(function(t){
+    var typeLabel = t.type==='deposit'?'<span class="badge badge-green">إيداع يدوي</span>':(t.type==='withdraw'?'<span class="badge badge-red">سحب يدوي</span>':'<span class="badge badge-orange">صرف معتمد</span>');
+    return '<tr><td>'+formatDateTime(t.date)+'</td><td>'+typeLabel+'</td><td>'+t.amount.toFixed(2)+'</td><td>'+(t.description||'')+'</td><td>'+t.user+'</td></tr>';
+  }).join('');
+  document.getElementById('tabContent').innerHTML = '<h2>🏦 الخزنة</h2>'+
+  '<div class="cards-row"><div class="stat-card">الرصيد الحالي بالخزنة<br><b>'+(safe.balance||0).toFixed(2)+' ج</b></div></div>'+
+  '<div class="row-flex"><button class="btn btn-primary" onclick="openSafeOpModal(\'deposit\')">+ إيداع بالخزنة</button><button class="btn btn-danger" onclick="openSafeOpModal(\'withdraw\')">- سحب من الخزنة</button><button class="btn" onclick="exportSafeExcel()">⬇️ تصدير Excel</button></div>'+
+  '<table class="data-table"><thead><tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الوصف</th><th>بواسطة</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">لا توجد حركات بعد</td></tr>')+'</tbody></table>';
+}
+function openSafeOpModal(type){
+  showModal('<h3>'+(type==='deposit'?'إيداع بالخزنة':'سحب من الخزنة')+'</h3><label>المبلغ</label><input type="number" id="safeOpAmount" value="0"><label>الوصف/السبب</label><input id="safeOpDesc"><button class="btn btn-primary" onclick="submitSafeOp(\''+type+'\')">تنفيذ</button>');
+}
+function submitSafeOp(type){
+  try{
+    var amount = parseFloat(document.getElementById('safeOpAmount').value)||0;
+    var desc = document.getElementById('safeOpDesc').value.trim();
+    if(amount<=0){ alert('أدخل مبلغ صحيح'); return; }
+    var safe = getSafe();
+    safe.balance = (safe.balance||0) + (type==='deposit'? amount : -amount);
+    saveSafe(safe);
+    var txs = getSafeTransactions();
+    txs.push({id:genId('safetx'), type:type, amount: (type==='deposit'?amount:-amount), description:desc, date:new Date().toISOString(), user:CURRENT_USER.displayName});
+    saveSafeTransactions(txs);
+    closeModal();
+    renderSafe();
+  }catch(e){ alert('خطأ: '+e.message); }
 }
 
 /* ========== LIVE FEED TAB ========== */
