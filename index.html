@@ -114,7 +114,7 @@ label.lb{font-weight:700;font-size:14px}
 <div id="scanOverlay"><div class="modal"><h3>📷 مسح الباركود</h3><div id="qrReader" style="width:100%"></div><button class="btn btn-red" style="width:100%;margin-top:8px" onclick="stopScanner()">إلغاء</button></div></div>
 
 <script>
-var APP_BUILD = 12;
+var APP_BUILD = 13;
 var firebaseConfig = {
   apiKey: "AIzaSyDIp3OlRAP0Wa7Ea1W87NZkYAwOe0xueSQ",
   authDomain: "casheir-840ee.firebaseapp.com",
@@ -127,7 +127,7 @@ var ROLE_PERMISSIONS = {
   admin: ['cashier','purchases','disbursements','returns','wallets','live','inventory','products','reports','profit','safe','deficits','users'],
   cashier: ['cashier','purchases','disbursements','returns','wallets','reports']
 };
-var SYNC_KEYS = ['cashier_users','cashier_products','cashier_sales','cashier_purchases','cashier_suppliers','cashier_disbursements','cashier_shifts','cashier_stock_adjustments','cashier_wallets','cashier_wallet_transactions','cashier_safe','cashier_safe_transactions','cashier_returns','cashier_damages','invoice_counter','purchase_counter','wallet_counter'];
+var SYNC_KEYS = ['cashier_users','cashier_products','cashier_sales','cashier_purchases','cashier_suppliers','cashier_disbursements','cashier_shifts','cashier_stock_adjustments','cashier_counts','cashier_wallets','cashier_wallet_transactions','cashier_safe','cashier_safe_transactions','cashier_returns','cashier_damages','invoice_counter','purchase_counter','wallet_counter'];
 var PAY = {cash:'نقدي',vodafone:'فودافون كاش',instapay:'انستاباي'};
 var METHODS = {paid:'الكاشير سدد العجز',salary:'خصم من مستحقات الكاشير',writeoff:'شطب العجز (خسارة)'};
 var TAB_DEFS = [
@@ -351,7 +351,7 @@ function calcShiftStats(sh){
     load('cashier_wallet_transactions').forEach(function(t){
       if(t.user!==sh.cashierName)return; var tt=new Date(t.date).getTime(); if(tt<st||tt>en)return;
       if(t.operation==='withdraw')r.walletCashTotal+=num(t.amount)+num(t.commission);
-      else if(t.operation==='deposit')r.walletCashTotal-=num(t.amount);
+      else if(t.operation==='deposit'){ r.walletCashTotal-=num(t.amount); r.walletCashTotal+=num(t.commission); }
     });
     load('cashier_disbursements').forEach(function(d){ if(d.shiftId===sh.id&&d.status==='approved'&&d.source==='drawer')r.expensesTotal+=num(d.amount); });
     load('cashier_returns').forEach(function(x){ if(x.shiftId===sh.id&&x.source==='drawer')r.returnsTotal+=num(x.refundAmount); });
@@ -776,20 +776,33 @@ function exportDamages(){xl('التالف.xlsx',[{name:'التالف',rows:scope
 
 /* ========== Wallets ========== */
 function commissionOf(a){return a<1000?5:15;}
+function drawerEffect(t){
+  if(t.operation==='withdraw')return num(t.amount)+num(t.commission);
+  if(t.operation==='deposit')return -num(t.amount)+num(t.commission);
+  return 0;
+}
 function renderWallets(){
   var w=load('cashier_wallets'), tx=scoped(load('cashier_wallet_transactions'),'user').slice().reverse();
-  $('content').innerHTML='<div class="cards">'+card('🔴 فودافون كاش',money(w.vodafone),'red')+card('🔵 انستاباي',money(w.instapay),'blue')+'</div>'+
-  '<div class="panel"><h3>💳 عملية جديدة</h3><div class="row"><select id="wlW"><option value="vodafone">فودافون كاش</option><option value="instapay">انستاباي</option></select><select id="wlOp" onchange="wlPrev()"><option value="withdraw">سحب / تحويل (العميل يدفع كاش + عمولة)</option><option value="deposit">إيداع (يزيد رصيد المحفظة وينقص الدرج)</option></select><input type="number" id="wlAmt" placeholder="المبلغ" step="0.01" oninput="wlPrev()"><button class="btn" onclick="submitWalletOp()">تنفيذ</button></div><div id="wlPrev" class="hint ok"></div>'+
+  var mk=monthKey(new Date());
+  var comOps=tx.filter(function(t){return t.operation==='withdraw'||t.operation==='deposit';});
+  var comToday=comOps.filter(function(t){return isToday(t.date);}).reduce(function(a,t){return a+num(t.commission);},0);
+  var comMonth=comOps.filter(function(t){return monthKey(t.date)===mk;}).reduce(function(a,t){return a+num(t.commission);},0);
+  $('content').innerHTML='<div class="cards">'+card('🔴 فودافون كاش',money(w.vodafone),'red')+card('🔵 انستاباي',money(w.instapay),'blue')+card('💰 عمولات اليوم',money(comToday),'or')+card('💰 عمولات الشهر',money(comMonth),'or')+'</div>'+
+  '<div class="panel"><h3>💳 عملية جديدة</h3><div class="row"><select id="wlW" onchange="wlPrev()"><option value="vodafone">فودافون كاش</option><option value="instapay">انستاباي</option></select><select id="wlOp" onchange="wlPrev()"><option value="withdraw">سحب / تحويل (ينقص رصيد المحفظة، العميل يدفع كاش + عمولة)</option><option value="deposit">إيداع (يزيد رصيد المحفظة وينقص الدرج، والعمولة تدخل الدرج)</option></select><input type="number" id="wlAmt" placeholder="المبلغ" step="0.01" oninput="wlPrev()"><button class="btn" onclick="submitWalletOp()">تنفيذ</button></div><div id="wlPrev" class="hint ok"></div>'+
   (isAdmin()?'<button class="btn btn-or btn-sm" onclick="submitWalletAdjust(\'vodafone\')">تعديل رصيد فودافون</button> <button class="btn btn-or btn-sm" onclick="submitWalletAdjust(\'instapay\')">تعديل رصيد انستاباي</button>':'')+'</div>'+
   '<div class="panel"><div class="row"><h3 style="margin:0;flex:1">سجل العمليات</h3><button class="btn btn-blue btn-sm" onclick="exportWallets()">📥 Excel</button></div>'+
-  tbl(['التاريخ','المحفظة','العملية','المبلغ','العمولة','بواسطة','ملاحظة'],tx.map(function(t){
+  tbl(['التاريخ','المحفظة','العملية','المبلغ','العمولة','أثر الدرج','بواسطة','ملاحظة'],tx.map(function(t){
     var op={withdraw:'سحب/تحويل',deposit:'إيداع',sale:'بيع',adjust:'تعديل رصيد'}[t.operation]||t.operation;
-    return '<tr><td>'+fdate(t.date)+'</td><td>'+(t.wallet==='vodafone'?'فودافون':'انستاباي')+'</td><td>'+op+'</td><td>'+money(t.amount)+'</td><td>'+money(t.commission)+'</td><td>'+esc(t.user)+'</td><td>'+esc(t.note||'')+'</td></tr>';
+    var de=drawerEffect(t);
+    var deTxt=(t.operation==='withdraw'||t.operation==='deposit')?'<b style="color:'+(de>=0?'#2e7d32':'#c62828')+'">'+(de>=0?'+':'')+money(de)+'</b>':'-';
+    return '<tr><td>'+fdate(t.date)+'</td><td>'+(t.wallet==='vodafone'?'فودافون':'انستاباي')+'</td><td>'+op+'</td><td>'+money(t.amount)+'</td><td>'+money(t.commission)+'</td><td>'+deTxt+'</td><td>'+esc(t.user)+'</td><td>'+esc(t.note||'')+'</td></tr>';
   }))+'</div>';
 }
 function wlPrev(){
-  var a=num($('wlAmt').value), op=$('wlOp').value; if(!a){$('wlPrev').textContent='';return;}
-  $('wlPrev').textContent=op==='withdraw'?('العميل يدفع: '+money(a+commissionOf(a))+' (العمولة '+money(commissionOf(a))+')'):('ينزل من الدرج: '+money(a));
+  var a=num($('wlAmt').value), op=$('wlOp').value, el=$('wlPrev'); if(!a){el.textContent='';return;}
+  var c=commissionOf(a);
+  if(op==='withdraw')el.textContent='العميل يدفع: '+money(a+c)+' (المبلغ '+money(a)+' + عمولة '+money(c)+') — الدرج يزيد '+money(a+c);
+  else el.textContent='ينزل من الدرج: '+money(a)+' + عمولة تدخل الدرج '+money(c)+' ← صافي أثر الدرج: '+money(c-a);
 }
 var WL_BUSY=false;
 function submitWalletOp(){
@@ -799,7 +812,7 @@ function submitWalletOp(){
   var bal=num(load('cashier_wallets')[w]);
   if(op==='withdraw'&&bal<a){alert('رصيد المحفظة غير كافي ('+money(bal)+')');return;}
   WL_BUSY=true;
-  var com=op==='withdraw'?commissionOf(a):0;
+  var com=commissionOf(a);
   adjustWalletBalance(w,op==='withdraw'?-a:a,{operation:op,amount:a,commission:com,note:''}).then(function(){WL_BUSY=false;renderWallets();}).catch(function(e){WL_BUSY=false;alert('فشل: '+e.message);});
 }
 function submitWalletAdjust(w){
@@ -808,7 +821,7 @@ function submitWalletAdjust(w){
   var tx=load('cashier_wallet_transactions'); tx.push({id:genId(),wallet:w,operation:'adjust',amount:diff,commission:0,date:new Date().toISOString(),user:me(),note:'تعديل يدوي'}); save('cashier_wallet_transactions',tx);
   renderWallets();
 }
-function exportWallets(){xl('المحافظ.xlsx',[{name:'المحافظ',rows:scoped(load('cashier_wallet_transactions'),'user').map(function(t){return {'التاريخ':fdate(t.date),'المحفظة':t.wallet,'العملية':t.operation,'المبلغ':num(t.amount),'العمولة':num(t.commission),'بواسطة':t.user,'ملاحظة':t.note||''};})}]);}
+function exportWallets(){xl('المحافظ.xlsx',[{name:'المحافظ',rows:scoped(load('cashier_wallet_transactions'),'user').map(function(t){return {'التاريخ':fdate(t.date),'المحفظة':t.wallet,'العملية':t.operation,'المبلغ':num(t.amount),'العمولة':num(t.commission),'أثر الدرج':drawerEffect(t),'بواسطة':t.user,'ملاحظة':t.note||''};})}]);}
 
 /* ========== Live ========== */
 function renderLive(){
@@ -818,12 +831,24 @@ function renderLive(){
 }
 
 /* ========== Inventory ========== */
+function inventoryValue(){
+  var r={units:0,cost:0,sale:0,neg:0,count:0};
+  load('cashier_products').forEach(function(p){
+    var s=num(p.stock); r.count++;
+    if(s<0){r.neg++;return;}
+    r.units+=s; r.cost+=s*num(p.costPrice); r.sale+=s*num(p.price);
+  });
+  r.cost=r2(r.cost); r.sale=r2(r.sale); r.units=r2(r.units);
+  return r;
+}
 function renderInventory(){
-  var l=load('cashier_products'), adj=load('cashier_stock_adjustments').slice(-50).reverse();
-  var units=0,cv=0,sv=0,out=0,low=0; l.forEach(function(p){var s=num(p.stock);units+=s;cv+=s*num(p.costPrice);sv+=s*num(p.price);var c=stockCls(p);if(c==='out')out++;else if(c==='low')low++;});
-  $('content').innerHTML='<div class="cards">'+card('عدد المنتجات',l.length)+card('إجمالي الوحدات',units)+card('قيمة المخزون (تكلفة)',money(cv),'blue')+card('قيمة المخزون (بيع)',money(sv),'blue')+card('نفد',out,'red')+card('منخفض',low,'or')+'</div>'+
+  var l=load('cashier_products'), adj=load('cashier_stock_adjustments').slice(-50).reverse(), cnts=load('cashier_counts').slice().reverse().slice(0,30);
+  var iv=inventoryValue(), out=0, low=0; l.forEach(function(p){var c=stockCls(p);if(c==='out')out++;else if(c==='low')low++;});
+  $('content').innerHTML='<div class="cards">'+card('عدد المنتجات',l.length)+card('إجمالي الوحدات',iv.units)+card('قيمة المخزون (تكلفة)',money(iv.cost),'blue')+card('قيمة المخزون (بيع)',money(iv.sale),'blue')+card('نفد',out,'red')+card('منخفض',low,'or')+'</div>'+
   '<div class="panel"><div class="row"><h3 style="margin:0;flex:1">📦 الجرد</h3><button class="btn" onclick="openCountModal()">🔍 بدء جرد دوري جديد</button><button class="btn btn-or" onclick="scanForInventoryAdjust()">📷 مسح باركود لتسوية منتج</button><button class="btn btn-blue" onclick="exportInventory()">📥 Excel</button></div>'+
   tbl(['المنتج','الباركود','التكلفة','السعر','المخزون','تاريخ الإضافة','تسوية'],l.map(function(p){return '<tr class="'+stockCls(p)+'"><td>'+esc(p.name)+'</td><td>'+esc(p.barcode||'-')+'</td><td>'+money(p.costPrice)+'</td><td>'+money(p.price)+'</td><td>'+num(p.stock)+'</td><td>'+fdate(p.dateAdded)+'</td><td><button class="btn btn-sm" onclick="openAdjust(\''+p.id+'\')">⚖️ تسوية</button></td></tr>';}))+'</div>'+
+  '<div class="panel"><div class="row"><h3 style="margin:0;flex:1">🗂️ سجل عمليات الجرد</h3><button class="btn btn-blue btn-sm" onclick="exportCounts()">📥 Excel الجرود</button></div>'+
+  tbl(['التاريخ','بواسطة','البيان','تم جرده','لم يُجرد','فيها فروق','قيمة الزيادة','قيمة النقص','الصافي','تفاصيل'],cnts.map(function(c){return '<tr><td>'+fdate(c.date)+'</td><td>'+esc(c.user)+'</td><td>'+esc(c.reason)+'</td><td>'+c.counted+' / '+c.total+'</td><td>'+c.uncounted.length+'</td><td>'+c.items.length+'</td><td style="color:#2e7d32">'+money(c.incValue)+'</td><td style="color:#c62828">'+money(c.decValue)+'</td><td><b style="color:'+(c.netValue>=0?'#2e7d32':'#c62828')+'">'+money(c.netValue)+'</b></td><td><button class="btn btn-sm btn-blue" onclick="viewCount(\''+c.id+'\')">عرض</button></td></tr>';}))+'</div>'+
   '<div class="panel"><h3>سجل التسويات (آخر 50)</h3>'+tbl(['التاريخ','المنتج','قبل','بعد','الفرق','النوع','السبب','بواسطة'],adj.map(function(a){return '<tr><td>'+fdate(a.date)+'</td><td>'+esc(a.productName)+'</td><td>'+a.qtyBefore+'</td><td>'+a.qtyAfter+'</td><td>'+a.difference+'</td><td>'+(a.type==='increase'?bd('زيادة ▲','g'):bd('نقص ▼','r'))+'</td><td>'+esc(a.reason||'')+'</td><td>'+esc(a.user)+'</td></tr>';}))+'</div>';
 }
 function openAdjust(id){
@@ -836,21 +861,111 @@ function saveAdjust(id){
   var before=num(p.stock), after=num(raw); if(before!==after){p.stock=after;save('cashier_products',prods);logAdjust(p,before,after,$('adjReason').value.trim()||'تسوية يدوية');}
   closeModal(); renderInventory();
 }
+
+/* --- periodic count (needs review before closing) --- */
+var COUNT={entries:{},reason:'جرد دوري',q:''}, COUNT_BUSY=false;
 function openCountModal(){
-  var l=load('cashier_products');
-  openModal('🔍 جرد دوري جديد','<p>اكتب الكمية الفعلية فقط للمنتجات اللي عدّيتها (الفاضي لا يتغير)</p><input id="cntReason" value="جرد دوري">'+
-  tbl(['المنتج','بالنظام','الفعلي'],l.map(function(p){return '<tr><td>'+esc(p.name)+'</td><td>'+num(p.stock)+'</td><td><input type="number" class="cntIn" data-id="'+p.id+'" style="width:90px;margin:0"></td></tr>';}))+'<button class="btn" onclick="saveCount()">💾 حفظ الجرد</button>',true);
+  COUNT={entries:{},reason:'جرد دوري',q:''};
+  renderCountEntry();
 }
-function saveCount(){
-  var prods=load('cashier_products'), reason=$('cntReason').value.trim()||'جرد دوري', n=0;
-  document.querySelectorAll('.cntIn').forEach(function(inp){
-    if(inp.value==='')return; var p=prods.filter(function(x){return x.id===inp.getAttribute('data-id');})[0]; if(!p)return;
-    var b=num(p.stock), a=num(inp.value); if(a!==b){p.stock=a;logAdjust(p,b,a,reason);n++;}
+function countDiffHtml(p,v){
+  if(v===undefined)return bd('لم يُجرد','n');
+  var d=r2(num(v)-num(p.stock));
+  if(Math.abs(d)<0.0001)return bd('مطابق','g');
+  return d>0?bd('زيادة +'+d,'g'):bd('نقص '+d,'r');
+}
+function renderCountEntry(){
+  var l=load('cashier_products');
+  var html='<div class="tot" id="cntProg"></div>'+
+  '<div class="row"><input id="cntReason" value="'+esc(COUNT.reason)+'" oninput="COUNT.reason=this.value" placeholder="بيان الجرد" style="flex:1"><input id="cntSearch" placeholder="🔎 بحث عن منتج..." value="'+esc(COUNT.q)+'" oninput="COUNT.q=this.value;filterCountRows()" style="flex:1"></div>'+
+  '<p style="font-size:13px;color:#555;margin:0 0 6px">اكتب الكمية الفعلية لكل منتج عدّيته. المنتج الفاضي = لم يُجرد (ولن يتغير). بعد الانتهاء اضغط "مراجعة النتائج" لمعرفة غير المجرود والفروق قبل إقفال الجرد.</p>'+
+  tbl(['المنتج','الباركود','بالنظام','الفعلي','الفرق'],l.map(function(p){
+    var v=COUNT.entries[p.id];
+    return '<tr class="cntRow" data-s="'+esc((p.name+' '+normBC(p.barcode)).toLowerCase())+'"><td>'+esc(p.name)+'</td><td>'+esc(p.barcode||'-')+'</td><td>'+num(p.stock)+'</td><td><input type="number" step="any" style="width:90px;margin:0" value="'+(v===undefined?'':esc(v))+'" oninput="onCountIn(\''+p.id+'\',this.value)"></td><td id="cd_'+p.id+'">'+countDiffHtml(p,v)+'</td></tr>';
+  }))+
+  '<button class="btn" style="width:100%;margin-top:8px" onclick="reviewCount()">🔎 مراجعة النتائج وإنهاء الجرد</button>';
+  openModal('🔍 جرد دوري جديد',html,true);
+  updateCountProg(); filterCountRows();
+}
+function onCountIn(id,v){
+  if(v==='')delete COUNT.entries[id]; else COUNT.entries[id]=v;
+  var p=load('cashier_products').filter(function(x){return x.id===id;})[0];
+  var c=$('cd_'+id); if(p&&c)c.innerHTML=countDiffHtml(p,COUNT.entries[id]);
+  updateCountProg();
+}
+function updateCountProg(){
+  var el=$('cntProg'); if(!el)return;
+  var total=load('cashier_products').length, n=Object.keys(COUNT.entries).length;
+  el.innerHTML='تم جرد <b>'+n+'</b> من <b>'+total+'</b> منتج — متبقي <b style="color:#c62828">'+(total-n)+'</b>';
+}
+function filterCountRows(){
+  var q=(COUNT.q||'').trim().toLowerCase();
+  document.querySelectorAll('.cntRow').forEach(function(r){r.style.display=(!q||r.getAttribute('data-s').indexOf(q)>=0)?'':'none';});
+}
+function computeCount(){
+  var prods=load('cashier_products'), items=[], unc=[], same=0;
+  prods.forEach(function(p){
+    var v=COUNT.entries[p.id];
+    if(v===undefined){unc.push({productId:p.id,name:p.name,stock:num(p.stock),costPrice:num(p.costPrice),barcode:p.barcode||''});return;}
+    var b=num(p.stock), a=num(v), d=r2(a-b);
+    if(Math.abs(d)<0.0001){same++;return;}
+    items.push({productId:p.id,name:p.name,before:b,after:a,diff:d,costPrice:num(p.costPrice),value:r2(d*num(p.costPrice))});
   });
-  save('cashier_products',prods); closeModal(); alert('تم تسوية '+n+' منتج'); renderInventory();
+  var inc=0,dec=0; items.forEach(function(i){ if(i.diff>0)inc+=i.value; else dec+=-i.value; });
+  return {items:items,unc:unc,same:same,total:prods.length,counted:prods.length-unc.length,inc:r2(inc),dec:r2(dec),net:r2(inc-dec)};
+}
+function reviewCount(){
+  var r=computeCount();
+  if(!r.counted){alert('لم تجرد أي منتج بعد');return;}
+  var h='<div class="cards">'+card('إجمالي المنتجات',r.total)+card('تم جرده',r.counted)+card('مطابق',r.same)+card('فيها فروق',r.items.length,'or')+card('لم يُجرد',r.unc.length,r.unc.length?'red':'')+'</div>'+
+  '<div class="cards">'+card('قيمة الزيادة (بالتكلفة)',money(r.inc))+card('قيمة النقص (بالتكلفة)',money(r.dec),'red')+card('صافي الفروق',money(r.net),r.net>=0?'blue':'red')+'</div>'+
+  '<h4 style="color:#e65100">⚖️ الأصناف التي بها فروق ('+r.items.length+')</h4>'+
+  tbl(['المنتج','بالنظام','الفعلي','الفرق','النوع','قيمة الفرق'],r.items.map(function(i){return '<tr><td>'+esc(i.name)+'</td><td>'+i.before+'</td><td>'+i.after+'</td><td><b>'+(i.diff>0?'+':'')+i.diff+'</b></td><td>'+(i.diff>0?bd('زيادة ▲','g'):bd('نقص ▼','r'))+'</td><td style="color:'+(i.value>=0?'#2e7d32':'#c62828')+'">'+money(i.value)+'</td></tr>';}))+
+  '<h4 style="color:#c62828">⏳ الأصناف التي لم تُجرد ('+r.unc.length+')</h4>'+
+  tbl(['المنتج','الباركود','بالنظام'],r.unc.map(function(u){return '<tr><td>'+esc(u.name)+'</td><td>'+esc(u.barcode||'-')+'</td><td>'+u.stock+'</td></tr>';}))+
+  (r.unc.length?'<label style="display:block;margin:10px 0;background:#fff8e1;padding:8px;border-radius:8px"><input type="checkbox" id="cntAck" style="width:auto"> راجعت الأصناف غير المجرودة وأؤكد تركها بدون تغيير</label>':'')+
+  '<div class="row" style="margin-top:8px"><button class="btn btn-gray" onclick="renderCountEntry()">↩️ رجوع لاستكمال الجرد</button><button class="btn" onclick="finalizeCount()">✅ اعتماد الجرد وإقفاله</button></div>'+
+  '<small style="color:#666">عند الاعتماد: تتحدث كميات الأصناف التي بها فروق فقط، وتُسجل في سجل التسويات وسجل الجرد.</small>';
+  openModal('🔎 مراجعة نتائج الجرد',h,true);
+}
+function finalizeCount(){
+  if(COUNT_BUSY)return;
+  var r=computeCount();
+  if(!r.counted){alert('لم تجرد أي منتج بعد');return;}
+  if(r.unc.length){ var ack=$('cntAck'); if(!ack||!ack.checked){alert('لازم تأكد إنك راجعت الأصناف غير المجرودة قبل إقفال الجرد');return;} }
+  COUNT_BUSY=true;
+  var prods=load('cashier_products'), now=new Date().toISOString(), reason=(COUNT.reason||'').trim()||'جرد دوري', adj=load('cashier_stock_adjustments');
+  r.items.forEach(function(i){
+    prods.forEach(function(p){ if(p.id===i.productId)p.stock=i.after; });
+    adj.push({id:genId(),productId:i.productId,productName:i.name,qtyBefore:i.before,qtyAfter:i.after,difference:i.diff,type:i.diff>0?'increase':'decrease',reason:reason+' (جرد)',date:now,user:me()});
+  });
+  var cs=load('cashier_counts');
+  cs.push({id:genId(),date:now,user:me(),reason:reason,total:r.total,counted:r.counted,same:r.same,items:r.items,uncounted:r.unc.map(function(u){return {productId:u.productId,name:u.name,stock:u.stock};}),incValue:r.inc,decValue:r.dec,netValue:r.net});
+  save('cashier_products',prods); save('cashier_stock_adjustments',adj); save('cashier_counts',cs);
+  COUNT_BUSY=false; COUNT={entries:{},reason:'جرد دوري',q:''};
+  closeModal(); alert('✅ تم إقفال الجرد\nتم جرد '+r.counted+' من '+r.total+'\nأصناف بها فروق: '+r.items.length+'\nلم يُجرد: '+r.unc.length+'\nصافي الفروق: '+money(r.net));
+  renderInventory();
+}
+function viewCount(id){
+  var c=load('cashier_counts').filter(function(x){return x.id===id;})[0]; if(!c)return;
+  var h='<p>'+fdate(c.date)+' | بواسطة '+esc(c.user)+' | '+esc(c.reason)+'</p><div class="cards">'+card('تم جرده',c.counted+' / '+c.total)+card('مطابق',c.same)+card('قيمة الزيادة',money(c.incValue))+card('قيمة النقص',money(c.decValue),'red')+card('الصافي',money(c.netValue),c.netValue>=0?'blue':'red')+'</div>'+
+  '<h4>الأصناف التي بها فروق</h4>'+tbl(['المنتج','قبل','بعد','الفرق','النوع','القيمة'],c.items.map(function(i){return '<tr><td>'+esc(i.name)+'</td><td>'+i.before+'</td><td>'+i.after+'</td><td>'+(i.diff>0?'+':'')+i.diff+'</td><td>'+(i.diff>0?bd('زيادة ▲','g'):bd('نقص ▼','r'))+'</td><td>'+money(i.value)+'</td></tr>';}))+
+  '<h4>الأصناف التي لم تُجرد ('+c.uncounted.length+')</h4>'+tbl(['المنتج','المخزون وقتها'],c.uncounted.map(function(u){return '<tr><td>'+esc(u.name)+'</td><td>'+u.stock+'</td></tr>';}));
+  openModal('🗂️ تفاصيل الجرد',h,true);
+}
+function exportCounts(){
+  var cs=load('cashier_counts'), det=[];
+  cs.forEach(function(c){
+    c.items.forEach(function(i){det.push({'تاريخ الجرد':fdate(c.date),'بواسطة':c.user,'المنتج':i.name,'الحالة':i.diff>0?'زيادة':'نقص','قبل':i.before,'بعد':i.after,'الفرق':i.diff,'قيمة الفرق بالتكلفة':i.value});});
+    c.uncounted.forEach(function(u){det.push({'تاريخ الجرد':fdate(c.date),'بواسطة':c.user,'المنتج':u.name,'الحالة':'لم يُجرد','قبل':u.stock,'بعد':'','الفرق':'','قيمة الفرق بالتكلفة':''});});
+  });
+  xl('سجل_الجرد.xlsx',[
+    {name:'ملخص الجرود',rows:cs.map(function(c){return {'التاريخ':fdate(c.date),'بواسطة':c.user,'البيان':c.reason,'إجمالي المنتجات':c.total,'تم جرده':c.counted,'مطابق':c.same,'فيها فروق':c.items.length,'لم يُجرد':c.uncounted.length,'قيمة الزيادة':c.incValue,'قيمة النقص':c.decValue,'الصافي':c.netValue};})},
+    {name:'التفاصيل',rows:det}
+  ]);
 }
 function scanForInventoryAdjust(){ openScanner(function(code){var p=findByBarcode(code); if(p)openAdjust(p.id); else alert('لا يوجد منتج بهذا الباركود');}); }
-function exportInventory(){xl('الجرد.xlsx',[{name:'الجرد',rows:load('cashier_products').map(function(p){return {'الاسم':p.name,'الباركود':p.barcode||'','سعر التكلفة':num(p.costPrice),'سعر البيع':num(p.price),'المخزون':num(p.stock),'تاريخ الإضافة':fdate(p.dateAdded),'قيمة المخزون بالتكلفة':r2(num(p.stock)*num(p.costPrice))};})},{name:'التسويات',rows:load('cashier_stock_adjustments').map(function(a){return {'التاريخ':fdate(a.date),'المنتج':a.productName,'قبل':a.qtyBefore,'بعد':a.qtyAfter,'الفرق':a.difference,'النوع':a.type==='increase'?'زيادة':'نقص','السبب':a.reason,'بواسطة':a.user};})}]);}
+function exportInventory(){xl('الجرد.xlsx',[{name:'الجرد',rows:load('cashier_products').map(function(p){return {'الاسم':p.name,'الباركود':p.barcode||'','سعر التكلفة':num(p.costPrice),'سعر البيع':num(p.price),'المخزون':num(p.stock),'تاريخ الإضافة':fdate(p.dateAdded),'قيمة المخزون بالتكلفة':r2(Math.max(0,num(p.stock))*num(p.costPrice))};})},{name:'التسويات',rows:load('cashier_stock_adjustments').map(function(a){return {'التاريخ':fdate(a.date),'المنتج':a.productName,'قبل':a.qtyBefore,'بعد':a.qtyAfter,'الفرق':a.difference,'النوع':a.type==='increase'?'زيادة':'نقص','السبب':a.reason,'بواسطة':a.user};})}]);}
 
 /* ========== Reports ========== */
 function shiftBadge(s){
@@ -860,11 +975,26 @@ function shiftBadge(s){
   if(s.transferred)return bd('محوّل للخزنة','g');
   return bd('مغلق','n');
 }
+function invValuePanel(){
+  var iv=inventoryValue();
+  var rows=load('cashier_products').filter(function(p){return num(p.stock)>0;}).map(function(p){return {name:p.name,stock:num(p.stock),cost:num(p.costPrice),val:r2(num(p.stock)*num(p.costPrice))};}).sort(function(a,b){return b.val-a.val;});
+  return '<div class="panel" style="border:2px solid var(--b)"><div class="row"><h3 style="margin:0;flex:1">📦 قيمة المخزون الحالي بالتكلفة</h3><button class="btn btn-blue btn-sm" onclick="exportInvValue()">📥 Excel</button></div>'+
+  '<div class="cards">'+card('قيمة المخزون بالتكلفة',money(iv.cost),'blue')+card('قيمته بسعر البيع',money(iv.sale))+card('إجمالي الوحدات',iv.units)+card('عدد الأصناف',iv.count)+'</div>'+
+  (iv.neg?'<div class="warnbox">⚠️ يوجد '+iv.neg+' صنف مخزونه بالسالب (لا يُحسب في القيمة). راجع الجرد.</div>':'')+
+  tbl(['الصنف','المخزون','سعر التكلفة','القيمة'],rows.map(function(r){return '<tr><td>'+esc(r.name)+'</td><td>'+r.stock+'</td><td>'+money(r.cost)+'</td><td><b>'+money(r.val)+'</b></td></tr>';}).concat(rows.length?['<tr><td colspan="3"><b>الإجمالي</b></td><td><b style="color:#1565c0">'+money(iv.cost)+'</b></td></tr>']:[]))+'</div>';
+}
+function exportInvValue(){
+  var iv=inventoryValue();
+  var rows=load('cashier_products').filter(function(p){return num(p.stock)>0;}).map(function(p){return {'الصنف':p.name,'المخزون':num(p.stock),'سعر التكلفة':num(p.costPrice),'القيمة بالتكلفة':r2(num(p.stock)*num(p.costPrice))};});
+  rows.push({'الصنف':'الإجمالي','المخزون':iv.units,'سعر التكلفة':'','القيمة بالتكلفة':iv.cost});
+  xl('قيمة_المخزون.xlsx',[{name:'قيمة المخزون',rows:rows}]);
+}
 function renderReports(){
   var sales=scoped(load('cashier_sales'),'soldBy'), shifts=scoped(load('cashier_shifts'),'cashierName').slice().reverse();
   var ts=sales.filter(function(s){return isToday(s.date);}), allT=sales.reduce(function(a,s){return a+num(s.total);},0);
   var disb=scoped(load('cashier_disbursements'),'requestedBy').filter(function(d){return d.status==='approved';}).reduce(function(a,d){return a+num(d.amount);},0);
-  $('content').innerHTML='<div class="cards">'+card('مبيعات اليوم',money(ts.reduce(function(a,s){return a+num(s.total);},0)))+card('عدد فواتير اليوم',ts.length,'blue')+card('إجمالي المنتجات',load('cashier_products').length)+card('إجمالي المبيعات',money(allT),'blue')+card('الصافي بعد الصرف',money(allT-disb),'or')+'</div>'+
+  $('content').innerHTML='<div class="cards">'+card('مبيعات اليوم',money(ts.reduce(function(a,s){return a+num(s.total);},0)))+card('عدد فواتير اليوم',ts.length,'blue')+card('إجمالي المنتجات',load('cashier_products').length)+card('إجمالي المبيعات',money(allT),'blue')+card('الصافي بعد الصرف',money(allT-disb),'or')+(isAdmin()?card('📦 المخزون الحالي (تكلفة)',money(inventoryValue().cost),'blue'):'')+'</div>'+
+  (isAdmin()?invValuePanel():'')+
   '<div class="panel"><div class="row"><h3 style="margin:0;flex:1">🕐 الشيفتات</h3></div>'+
   tbl(['الكاشير','البداية','النهاية','افتتاحي','المتوقع','الفعلي','الفرق','الحالة'],shifts.map(function(s){return '<tr><td>'+esc(s.cashierName)+'</td><td>'+fdate(s.startTime)+'</td><td>'+fdate(s.endTime)+'</td><td>'+money(s.openingAmount)+'</td><td>'+(s.closed?money(s.expectedAmount):'-')+'</td><td>'+(s.closed?money(s.closingAmount):'-')+'</td><td>'+(s.closed?money(s.difference):'-')+'</td><td>'+shiftBadge(s)+'</td></tr>';}))+'</div>'+
   '<div class="panel"><div class="row"><h3 style="margin:0;flex:1">🧾 الفواتير</h3><button class="btn btn-blue btn-sm" onclick="exportSales()">📥 Excel</button></div>'+
