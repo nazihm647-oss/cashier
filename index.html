@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -255,8 +254,15 @@ function xl(filename,sheets){
 window.onerror=function(m){console.error(m);};
 
 /* ========== Modal / Scanner ========== */
-function openModal(title,html,wide){ $('modalBox').className=wide?'modal wide':'modal'; $('modalTitle').innerHTML=title; $('modalBody').innerHTML=html; $('modalOverlay').style.display='flex'; }
-function closeModal(){ $('modalOverlay').style.display='none'; $('modalBody').innerHTML=''; }
+function focusCashSearch(){
+  if(!CURRENT_USER||currentTab!=='cashier'||modalOpen())return;
+  var s=$('cashSearch'); if(!s)return;
+  var a=document.activeElement;
+  if(a&&a!==s&&/INPUT|TEXTAREA|SELECT/.test(a.tagName))return;
+  try{s.focus({preventScroll:true});}catch(e){s.focus();}
+}
+function openModal(title,html,wide){ if(document.activeElement&&document.activeElement.blur)document.activeElement.blur(); $('modalBox').className=wide?'modal wide':'modal'; $('modalTitle').innerHTML=title; $('modalBody').innerHTML=html; $('modalOverlay').style.display='flex'; }
+function closeModal(){ $('modalOverlay').style.display='none'; $('modalBody').innerHTML=''; setTimeout(focusCashSearch,0); }
 function modalOpen(){ return $('modalOverlay').style.display==='flex'||$('scanOverlay').style.display==='flex'; }
 var SCANNER=null;
 function openScanner(cb){
@@ -269,7 +275,7 @@ function openScanner(cb){
 }
 function stopScanner(cb){
   var s=SCANNER; SCANNER=null;
-  function fin(){ $('scanOverlay').style.display='none'; $('qrReader').innerHTML=''; if(cb)cb(); }
+  function fin(){ $('scanOverlay').style.display='none'; $('qrReader').innerHTML=''; if(cb)cb(); setTimeout(focusCashSearch,0); }
   if(s){ s.stop().then(function(){try{s.clear();}catch(e){} fin();}).catch(fin); } else fin();
 }
 function scanIntoField(fid){
@@ -414,7 +420,7 @@ function renderCashier(){
   '<div class="row"><label>الدفع</label><select onchange="PAYM=this.value">'+Object.keys(PAY).map(function(k){return '<option value="'+k+'"'+(PAYM===k?' selected':'')+'>'+PAY[k]+'</option>';}).join('')+'</select></div>'+
   '<div class="tot" id="totals"></div><button class="btn" style="width:100%;font-size:17px" onclick="processCheckout()">✅ إتمام البيع</button><button class="btn btn-gray" style="width:100%" onclick="CART=[];renderCart()">مسح الفاتورة</button></div>'+
   '<div class="prodPanel panel"><h3>🛍️ المنتجات</h3><div class="row"><input id="cashSearch" placeholder="ابحث بالاسم أو الباركود (Enter لإضافة بالباركود)" style="flex:1" value="'+esc(CASH_SEARCH)+'" oninput="CASH_SEARCH=this.value;renderProductGrid()" onkeydown="if(event.key===\'Enter\')cashEnter()"><button class="btn" onclick="scanForCashier()">📷</button></div><div class="pgrid" id="prodGrid"></div></div></div>';
-  renderProductGrid(); renderCart();
+  renderProductGrid(); renderCart(); focusCashSearch();
 }
 function cashEnter(){
   var p=findByBarcode(CASH_SEARCH);
@@ -448,7 +454,7 @@ function renderCart(){
   $('cartItems').innerHTML=CART.map(function(i,k){
     return '<div class="ci"><span class="nm">'+esc(i.name)+'<br><small>'+money(i.price)+'</small></span><button class="qb" onclick="chQty('+k+',-1)">−</button><input type="number" value="'+i.qty+'" min="1" onchange="setQty('+k+',this.value)"><button class="qb" onclick="chQty('+k+',1)">+</button><b>'+money(i.price*i.qty)+'</b><button class="qb" style="background:#ffcdd2" onclick="rmItem('+k+')">✕</button></div>';
   }).join('')||'<div class="empty center" style="padding:20px;color:#999">الفاتورة فارغة</div>';
-  renderTotals();
+  renderTotals(); focusCashSearch();
 }
 function renderTotals(){
   if(!$('totals'))return; var t=calcTotals();
@@ -558,6 +564,7 @@ function openPurchaseModal(){
   var sups=load('cashier_suppliers'), prods=load('cashier_products');
   openModal('📥 فاتورة شراء جديدة',
    '<div class="row"><select id="purSupplier" style="flex:1"><option value="">— اختر المورد —</option>'+sups.map(function(s){return '<option value="'+s.id+'">'+esc(s.name)+' ('+(isCredit(s)?'آجل':'كاش')+')</option>';}).join('')+'</select>'+(isAdmin()?'<button class="btn btn-sm" onclick="openAddSupplier()">➕ إضافة مورد</button>':'')+'</div>'+
+   '<div class="row"><label class="lb">سداد فاتورة المورد الكاش:</label><select id="purPaySrc"><option value="safe">من الخزنة</option><option value="drawer">من الدرج</option></select><small>(المورد الآجل بيتدفع بالأقساط وتختار المصدر وقت صرف كل قسط)</small></div>'+
    '<div class="panel" style="background:#f7fbf7"><b>إضافة صنف</b>'+
    '<select id="purSelectProd" onchange="onPurProdChange()"><option value="">— صنف جديد / اختر منتج موجود —</option>'+prods.map(function(p){return '<option value="'+p.id+'">'+esc(p.name)+'</option>';}).join('')+'</select>'+
    '<input id="purName" placeholder="اسم الصنف">'+
@@ -610,14 +617,23 @@ function savePurchase(){
   var sid=$('purSupplier').value; if(!sid){alert('اختر المورد');return;}
   if(!PUR_ITEMS.length){alert('أضف صنف واحد على الأقل');return;}
   var sup=load('cashier_suppliers').filter(function(s){return s.id===sid;})[0]; if(!sup)return;
-  SAVING_PUR=true;
   var total=r2(PUR_ITEMS.reduce(function(a,i){return a+i.subtotal;},0)), items=PUR_ITEMS.slice();
+  var cashSup=!isCredit(sup), src=cashSup?$('purPaySrc').value:null, sh=getOpenShift();
+  if(cashSup&&isAdmin()){
+    if(src==='safe'&&num(load('cashier_safe').balance)<total){alert('رصيد الخزنة غير كافي ('+money(num(load('cashier_safe').balance))+')');return;}
+    if(src==='drawer'){ if(!sh){alert('لازم تفتح شيفت للدفع من الدرج');return;} if(calcShiftStats(sh).expected<total){alert('رصيد الدرج غير كافي');return;} }
+  }
+  if(cashSup&&!isAdmin()&&src==='drawer'&&!sh){alert('لازم تفتح شيفت للدفع من الدرج');return;}
+  SAVING_PUR=true;
   nextCounter('purchase_counter',1001).then(function(n){
-    var p={id:genId(),purchaseNum:'PUR-'+n,supplierId:sup.id,supplierName:sup.name,items:items,total:total,status:isAdmin()?'approved':'pending',requestedBy:me(),date:new Date().toISOString(),installments:isCredit(sup)?buildInstallments(total,3):null,approvedBy:isAdmin()?me():null,approvedDate:isAdmin()?new Date().toISOString():null,rejectReason:null};
-    if(isAdmin())applyPurchaseToStock(p);
-    var l=load('cashier_purchases'); l.push(p); save('cashier_purchases',l);
-    SAVING_PUR=false; closeModal(); renderPurchases();
-    alert(isAdmin()?'✅ تم حفظ الفاتورة وتحديث المخزون':'✅ تم إرسال الفاتورة للمدير للموافقة');
+    var p={id:genId(),purchaseNum:'PUR-'+n,supplierId:sup.id,supplierName:sup.name,items:items,total:total,status:isAdmin()?'approved':'pending',requestedBy:me(),date:new Date().toISOString(),installments:isCredit(sup)?buildInstallments(total,3):null,approvedBy:isAdmin()?me():null,approvedDate:isAdmin()?new Date().toISOString():null,rejectReason:null,paySource:src,payShiftId:(cashSup&&src==='drawer'&&sh)?sh.id:null,paid:false};
+    var after=Promise.resolve();
+    if(isAdmin()) after=(cashSup?payCashPurchase(p):Promise.resolve()).then(function(){applyPurchaseToStock(p);});
+    return after.then(function(){
+      var l=load('cashier_purchases'); l.push(p); save('cashier_purchases',l);
+      SAVING_PUR=false; closeModal(); renderPurchases();
+      alert(isAdmin()?'✅ تم حفظ الفاتورة وتحديث المخزون'+(cashSup?' وخصم المبلغ من '+(src==='safe'?'الخزنة':'الدرج'):''):'✅ تم إرسال الفاتورة للمدير للموافقة');
+    });
   }).catch(function(e){SAVING_PUR=false;alert('خطأ: '+e.message);});
 }
 function applyPurchaseToStock(pu){
@@ -639,8 +655,19 @@ function applyPurchaseToStock(pu){
 function approvePurchase(id){
   if(!isAdmin())return; var l=load('cashier_purchases'), p=l.filter(function(x){return x.id===id;})[0];
   if(!p||p.status!=='pending')return;
-  p.status='approved'; p.approvedBy=me(); p.approvedDate=new Date().toISOString();
-  applyPurchaseToStock(p); save('cashier_purchases',l); renderPurchases();
+  var needPay=!p.installments&&!p.paid&&!!p.paySource;
+  if(needPay&&p.paySource==='safe'&&num(load('cashier_safe').balance)<num(p.total)){alert('رصيد الخزنة غير كافي ('+money(num(load('cashier_safe').balance))+')');return;}
+  if(BUSY['pur_'+id])return; BUSY['pur_'+id]=true;
+  (needPay?payCashPurchase(p):Promise.resolve()).then(function(){
+    p.status='approved'; p.approvedBy=me(); p.approvedDate=new Date().toISOString();
+    applyPurchaseToStock(p); save('cashier_purchases',l); BUSY['pur_'+id]=false; renderPurchases();
+  }).catch(function(e){BUSY['pur_'+id]=false;alert('فشل: '+e.message);});
+}
+function payCashPurchase(p){
+  var now=new Date().toISOString();
+  var d={id:genId(),description:'سداد فاتورة '+(p.purchaseNum||'')+' - '+p.supplierName,amount:num(p.total),source:p.paySource||'safe',category:'purchase',purchaseId:p.id,installmentId:null,shiftId:p.payShiftId||null,requestedBy:p.requestedBy,status:'approved',approvedBy:me(),approvedDate:now,rejectReason:null,date:now};
+  var pr=(d.source==='safe')?adjustSafeBalance(-d.amount,{type:'disbursement',description:d.description}):Promise.resolve();
+  return pr.then(function(){ var ds=load('cashier_disbursements'); ds.push(d); save('cashier_disbursements',ds); p.paid=true; });
 }
 function rejectPurchase(id){
   if(!isAdmin())return; var r=prompt('سبب الرفض (مطلوب):'); if(!r||!r.trim()){alert('لازم تكتب سبب الرفض');return;}
@@ -649,7 +676,7 @@ function rejectPurchase(id){
 }
 function viewPurchaseDetails(id){
   var p=load('cashier_purchases').filter(function(x){return x.id===id;})[0]; if(!p)return;
-  var h='<p>المورد: <b>'+esc(p.supplierName)+'</b> | '+stBadge(p.status)+' | '+fdate(p.date)+' | بواسطة '+esc(p.requestedBy)+'</p>'+
+  var h='<p>المورد: <b>'+esc(p.supplierName)+'</b> | '+stBadge(p.status)+' | '+fdate(p.date)+' | بواسطة '+esc(p.requestedBy)+(p.paySource&&!p.installments?' | السداد: '+(p.paid?'تم من ':'من ')+(p.paySource==='safe'?'الخزنة':'الدرج'):'')+'</p>'+
   tbl(['الصنف','الباركود','التكلفة','البيع','الكمية','الإجمالي'],p.items.map(function(i){return '<tr><td>'+esc(i.name)+'</td><td>'+esc(i.barcode||'-')+'</td><td>'+money(i.costPrice)+'</td><td>'+money(i.price)+'</td><td>'+i.qty+'</td><td>'+money(i.subtotal)+'</td></tr>';}))+'<div class="tot">الإجمالي: <b>'+money(p.total)+'</b></div>';
   if(p.installments){
     h+='<h4>الأقساط</h4>'+tbl(['القسط','المبلغ','الحالة','إجراء'],p.installments.map(function(i){
@@ -661,15 +688,21 @@ function viewPurchaseDetails(id){
   openModal('📥 '+esc(p.purchaseNum||''),h,true);
 }
 function requestInstallment(pid,iid){
+  openModal('🧾 صرف القسط','<label class="lb">مصدر الدفع</label><select id="insSrc"><option value="safe">من الخزنة</option><option value="drawer">من الدرج</option></select><button class="btn" onclick="confirmInstallment(\''+pid+'\',\''+iid+'\')">تأكيد</button>');
+}
+function confirmInstallment(pid,iid){
+  var src=$('insSrc').value, sh=getOpenShift();
+  if(src==='drawer'&&!sh){alert('لازم تفتح شيفت للدفع من الدرج');return;}
   var l=load('cashier_purchases'), p=l.filter(function(x){return x.id===pid;})[0]; if(!p)return;
   var ins=p.installments.filter(function(i){return i.id===iid;})[0]; if(!ins||ins.paid||ins.disbursementRequested)return;
-  var d={id:genId(),description:'قسط رقم '+ins.number+' - فاتورة '+(p.purchaseNum||'')+' - '+p.supplierName,amount:ins.amount,source:'safe',category:'installment',purchaseId:pid,installmentId:iid,shiftId:null,requestedBy:me(),status:'pending',approvedBy:null,approvedDate:null,rejectReason:null,date:new Date().toISOString()};
+  var d={id:genId(),description:'قسط رقم '+ins.number+' - فاتورة '+(p.purchaseNum||'')+' - '+p.supplierName,amount:ins.amount,source:src,category:'installment',purchaseId:pid,installmentId:iid,shiftId:(src==='drawer'?sh.id:null),requestedBy:me(),status:'pending',approvedBy:null,approvedDate:null,rejectReason:null,date:new Date().toISOString()};
   if(isAdmin()){
-    var bal=num(load('cashier_safe').balance); if(bal<ins.amount){alert('رصيد الخزنة غير كافي ('+money(bal)+')');return;}
+    if(src==='safe'){var bal=num(load('cashier_safe').balance); if(bal<ins.amount){alert('رصيد الخزنة غير كافي ('+money(bal)+')');return;}}
+    else if(calcShiftStats(sh).expected<ins.amount){alert('رصيد الدرج غير كافي');return;}
     d.status='approved'; d.approvedBy=me(); d.approvedDate=new Date().toISOString();
     applyApprovedEffects(d).then(function(){
       var ds=load('cashier_disbursements'); ds.push(d); save('cashier_disbursements',ds);
-      closeModal(); alert('✅ تم صرف القسط من الخزنة'); renderTab(currentTab);
+      closeModal(); alert('✅ تم صرف القسط من '+(src==='safe'?'الخزنة':'الدرج')); renderTab(currentTab);
     }).catch(function(e){alert('فشل: '+e.message);});
     return;
   }
@@ -788,7 +821,7 @@ function renderWallets(){
   var comToday=comOps.filter(function(t){return isToday(t.date);}).reduce(function(a,t){return a+num(t.commission);},0);
   var comMonth=comOps.filter(function(t){return monthKey(t.date)===mk;}).reduce(function(a,t){return a+num(t.commission);},0);
   $('content').innerHTML='<div class="cards">'+card('🔴 فودافون كاش',money(w.vodafone),'red')+card('🔵 انستاباي',money(w.instapay),'blue')+card('💰 عمولات اليوم',money(comToday),'or')+card('💰 عمولات الشهر',money(comMonth),'or')+'</div>'+
-  '<div class="panel"><h3>💳 عملية جديدة</h3><div class="row"><select id="wlW" onchange="wlPrev()"><option value="vodafone">فودافون كاش</option><option value="instapay">انستاباي</option></select><select id="wlOp" onchange="wlPrev()"><option value="withdraw">سحب / تحويل (ينقص رصيد المحفظة، العميل يدفع كاش + عمولة)</option><option value="deposit">إيداع (يزيد رصيد المحفظة وينقص الدرج، والعمولة تدخل الدرج)</option></select><input type="number" id="wlAmt" placeholder="المبلغ" step="0.01" oninput="wlPrev()"><button class="btn" onclick="submitWalletOp()">تنفيذ</button></div><div id="wlPrev" class="hint ok"></div>'+
+  '<div class="panel"><h3>💳 عملية جديدة</h3><div class="row"><select id="wlW" onchange="wlPrev()"><option value="vodafone">فودافون كاش</option><option value="instapay">انستاباي</option></select><select id="wlOp" onchange="wlPrev()"><option value="withdraw">سحب / تحويل (ينقص رصيد المحفظة، العميل يدفع كاش + عمولة)</option><option value="deposit">إيداع (يزيد رصيد المحفظة وينقص الدرج، والعمولة تدخل الدرج)</option></select><input type="number" id="wlAmt" placeholder="المبلغ" step="0.01" min="0" oninput="wlPrev()"><input type="number" id="wlCom" placeholder="العمولة (اكتبها يدوي)" step="0.01" min="0" oninput="wlPrev()"><button class="btn" onclick="submitWalletOp()">تنفيذ</button></div><div id="wlPrev" class="hint ok"></div>'+
   (isAdmin()?'<button class="btn btn-or btn-sm" onclick="submitWalletAdjust(\'vodafone\')">تعديل رصيد فودافون</button> <button class="btn btn-or btn-sm" onclick="submitWalletAdjust(\'instapay\')">تعديل رصيد انستاباي</button>':'')+'</div>'+
   '<div class="panel"><div class="row"><h3 style="margin:0;flex:1">سجل العمليات</h3><button class="btn btn-blue btn-sm" onclick="exportWallets()">📥 Excel</button></div>'+
   tbl(['التاريخ','المحفظة','العملية','المبلغ','العمولة','أثر الدرج','بواسطة','ملاحظة'],tx.map(function(t){
@@ -800,7 +833,7 @@ function renderWallets(){
 }
 function wlPrev(){
   var a=num($('wlAmt').value), op=$('wlOp').value, el=$('wlPrev'); if(!a){el.textContent='';return;}
-  var c=commissionOf(a);
+  var c=num($('wlCom').value);
   if(op==='withdraw')el.textContent='العميل يدفع: '+money(a+c)+' (المبلغ '+money(a)+' + عمولة '+money(c)+') — الدرج يزيد '+money(a+c);
   else el.textContent='ينزل من الدرج: '+money(a)+' + عمولة تدخل الدرج '+money(c)+' ← صافي أثر الدرج: '+money(c-a);
 }
@@ -811,8 +844,9 @@ function submitWalletOp(){
   var w=$('wlW').value, op=$('wlOp').value, a=num($('wlAmt').value); if(a<=0){alert('اكتب مبلغ صحيح');return;}
   var bal=num(load('cashier_wallets')[w]);
   if(op==='withdraw'&&bal<a){alert('رصيد المحفظة غير كافي ('+money(bal)+')');return;}
+  var comRaw=$('wlCom').value; if(comRaw===''||num(comRaw)<0){alert('اكتب العمولة يدوي (اكتب 0 لو مفيش عمولة)');return;}
   WL_BUSY=true;
-  var com=commissionOf(a);
+  var com=r2(comRaw);
   adjustWalletBalance(w,op==='withdraw'?-a:a,{operation:op,amount:a,commission:com,note:''}).then(function(){WL_BUSY=false;renderWallets();}).catch(function(e){WL_BUSY=false;alert('فشل: '+e.message);});
 }
 function submitWalletAdjust(w){
@@ -1008,7 +1042,7 @@ function monthlyFigures(){
   var sales=load('cashier_sales').filter(function(s){return inM(s.date);});
   var sum=function(a,f){return a.reduce(function(x,y){return x+num(f(y));},0);};
   var gross=sum(sales,function(s){return s.profit;});
-  var disb=sum(load('cashier_disbursements').filter(function(d){return d.status==='approved'&&inM(d.approvedDate||d.date);}),function(d){return d.amount;});
+  var disb=sum(load('cashier_disbursements').filter(function(d){return d.status==='approved'&&d.category!=='purchase'&&inM(d.approvedDate||d.date);}),function(d){return d.amount;});
   var dmg=sum(load('cashier_damages').filter(function(d){return inM(d.date);}),function(d){return d.lossValue;});
   var ret=sum(load('cashier_returns').filter(function(d){return inM(d.date);}),function(x){return num(x.refundAmount)-num(x.costPrice)*num(x.qty);});
   var wo=sum(load('cashier_shifts').filter(function(s){return s.deficitStatus==='settled'&&s.settlement&&s.settlement.method==='writeoff'&&inM(s.settlement.date);}),function(s){return s.deficit;});
@@ -1170,4 +1204,3 @@ function resetAllData(){
 </script>
 </body>
 </html>
-```
