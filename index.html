@@ -121,7 +121,7 @@ label.lb{font-weight:700;font-size:14px}
 <div id="scanOverlay"><div class="modal"><h3>📷 مسح الباركود</h3><div id="qrReader" style="width:100%"></div><button class="btn btn-red" style="width:100%;margin-top:8px" onclick="stopScanner()">إلغاء</button></div></div>
 
 <script>
-var APP_BUILD = 23;
+var APP_BUILD = 24;
 var firebaseConfig = {
   apiKey: "AIzaSyDIp3OlRAP0Wa7Ea1W87NZkYAwOe0xueSQ",
   authDomain: "casheir-840ee.firebaseapp.com",
@@ -2132,7 +2132,7 @@ function renderSuppliers(){
   $('content').innerHTML='<div class="cards">'+card('إجمالي المستحق للموردين (فواتير + مبالغ)',money(tot))+card('إجمالي المسدد',money(tot-due),'blue')+card('المتبقي للموردين',money(due),due>0?'red':'')+card('تغذية Super pay',money(spIn),'or')+'</div>'+
   '<div class="panel"><div class="row"><h3 style="margin:0;flex:1">🏭 حساب الموردين</h3><button class="btn" onclick="openSupplierDebt()">➕ مورد / مبلغ مستحق</button><button class="btn btn-blue" onclick="exportSuppliers()">📥 Excel</button></div>'+
   tbl(['المورد','النوع','عدد الفواتير','مبالغ مضافة','إجمالي المستحق','المسدد','المتبقي','قيد الاعتماد','إجراء'],rows.map(function(r){
-    return '<tr><td><b>'+esc(r.s.name)+'</b></td><td>'+(isCredit(r.s)?bd('آجل','o'):bd('كاش','g'))+'</td><td>'+r.st.count+'</td><td>'+money(r.st.debts)+'</td><td>'+money(r.st.total)+'</td><td>'+money(r.st.paid)+'</td><td style="color:'+(r.st.due>0?'#c62828':'#2e7d32')+'"><b>'+money(r.st.due)+'</b></td><td>'+money(r.st.pending)+'</td><td><button class="btn btn-sm btn-blue" onclick="viewSupplier(\''+r.s.id+'\')">كشف حساب</button> <button class="btn btn-sm" onclick="openSupplierPay(\''+r.s.id+'\')">💵 سداد</button></td></tr>';
+    return '<tr><td><b>'+esc(r.s.name)+'</b></td><td>'+(isCredit(r.s)?bd('آجل','o'):bd('كاش','g'))+'</td><td>'+r.st.count+'</td><td>'+money(r.st.debts)+'</td><td>'+money(r.st.total)+'</td><td>'+money(r.st.paid)+'</td><td style="color:'+(r.st.due>0?'#c62828':'#2e7d32')+'"><b>'+money(r.st.due)+'</b></td><td>'+money(r.st.pending)+'</td><td><button class="btn btn-sm btn-blue" onclick="viewSupplier(\''+r.s.id+'\')">كشف حساب</button> <button class="btn btn-sm" onclick="openSupplierPay(\''+r.s.id+'\')">💵 سداد</button> <button class="btn btn-sm btn-gray" onclick="openSupplierEdit(\''+r.s.id+'\')">✏️ تعديل</button></td></tr>';
   }).concat(['<tr style="background:#f3e5f5"><td><b>Super pay</b></td><td>'+bd('رصيد','b')+'</td><td>-</td><td>-</td><td>'+money(spIn)+'</td><td>-</td><td>-</td><td>-</td><td><button class="btn btn-sm btn-blue" onclick="renderTab(\'superpay\')">فتح سوبر باي</button></td></tr>']))+'</div>';
 }
 function openSupplierDebt(supId){
@@ -2157,7 +2157,7 @@ function viewSupplier(id){
   var pays=load('cashier_supplier_payments').filter(function(x){return x.supplierId===id;}).slice().reverse();
   var debts=load('cashier_supplier_debts').filter(function(x){return x.supplierId===id;}).slice().reverse();
   var h='<div class="cards">'+card('إجمالي المستحق',money(st.total))+card('المسدد',money(st.paid),'blue')+card(st.due<0?'رصيد للمورد (دفعنا زيادة)':'المتبقي',money(Math.abs(st.due)),st.due>0?'red':'')+'</div>'+
-  '<div class="row" style="margin:8px 0"><button class="btn" onclick="openSupplierPay(\''+id+'\')">💵 سداد دفعة للمورد</button><button class="btn btn-or" onclick="openSupplierDebt(\''+id+'\')">➕ إضافة مبلغ مستحق</button></div>'+
+  '<div class="row" style="margin:8px 0"><button class="btn" onclick="openSupplierPay(\''+id+'\')">💵 سداد دفعة للمورد</button><button class="btn btn-or" onclick="openSupplierDebt(\''+id+'\')">➕ إضافة مبلغ مستحق</button><button class="btn btn-gray" onclick="openSupplierEdit(\''+id+'\')">✏️ تعديل الاسم</button></div>'+
   tbl(['الفاتورة','التاريخ','الإجمالي','الحالة','السداد','المتبقي'],all.map(function(p){
     var paid=p.installments?p.installments.reduce(function(a,i){return a+instPaid(i);},0):(p.paid?num(p.total):0);
     return '<tr><td><span class="invlink" onclick="viewPurchaseDetails(\''+p.id+'\')">'+esc(p.purchaseNum||p.id)+'</span></td><td>'+fdate(p.date)+'</td><td>'+money(p.total)+'</td><td>'+stBadge(p.status)+'</td><td>'+money(paid)+'</td><td>'+money(p.status==='approved'?num(p.total)-paid:0)+'</td></tr>';
@@ -2173,6 +2173,25 @@ function viewSupplier(id){
   if(pend.length)h+='<h4>دفعات في انتظار اعتماد المدير</h4>'+tbl(['التاريخ','المبلغ','المصدر','بواسطة'],pend.map(function(d){return '<tr><td>'+fdate(d.date)+'</td><td>'+money(d.amount)+'</td><td>'+srcLabel(d.source)+'</td><td>'+esc(d.requestedBy)+'</td></tr>';}));
   h+='<h4>💵 سجل الدفعات</h4>'+tbl(['التاريخ','المبلغ','المصدر','على أقساط','على الرصيد / مقدمة','ملاحظة','بواسطة'],pays.map(function(x){return '<tr><td>'+fdate(x.date)+'</td><td><b>'+money(x.amount)+'</b></td><td>'+srcLabel(x.source)+'</td><td>'+money(x.allocated)+'</td><td>'+money(x.advance)+'</td><td>'+esc(x.note||'')+'</td><td>'+esc(x.by||'')+'</td></tr>';}));
   openModal('🏭 كشف حساب '+esc(s.name),h,true);
+}
+
+
+function openSupplierEdit(id){
+  var s=load('cashier_suppliers').filter(function(x){return x.id===id;})[0]; if(!s)return;
+  openModal('✏️ تعديل المورد','<label class="lb">اسم المورد</label><input id="seName" value="'+esc(s.name)+'" onkeydown="if(event.key===\'Enter\')saveSupplierEdit(\''+id+'\')"><label class="lb">النوع (يؤثر على الفواتير الجديدة فقط)</label><select id="seType"><option value="cash"'+(isCredit(s)?'':' selected')+'>كاش</option><option value="credit"'+(isCredit(s)?' selected':'')+'>آجل</option></select><button class="btn" onclick="saveSupplierEdit(\''+id+'\')">💾 حفظ</button>');
+}
+function saveSupplierEdit(id){
+  var n=$('seName').value.trim(); if(!n){alert('اكتب الاسم');return;}
+  var l=load('cashier_suppliers');
+  if(l.some(function(x){return x.name===n&&x.id!==id;})){alert('الاسم مستخدم لمورد آخر');return;}
+  var s=l.filter(function(x){return x.id===id;})[0]; if(!s)return;
+  var old=s.name; s.name=n; s.type=$('seType').value; save('cashier_suppliers',l);
+  if(old!==n){
+    var ps=load('cashier_purchases'); ps.forEach(function(p){if(p.supplierId===id)p.supplierName=n;}); save('cashier_purchases',ps);
+    var sp=load('cashier_supplier_payments'); sp.forEach(function(p){if(p.supplierId===id)p.supplierName=n;}); save('cashier_supplier_payments',sp);
+    var ds=load('cashier_disbursements'); ds.forEach(function(d){if(d.supplierId===id)d.supplierName=n;}); save('cashier_disbursements',ds);
+  }
+  closeModal(); renderSuppliers();
 }
 
 </script>
