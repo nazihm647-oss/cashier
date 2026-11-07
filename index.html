@@ -121,7 +121,7 @@ label.lb{font-weight:700;font-size:14px}
 <div id="scanOverlay"><div class="modal"><h3>📷 مسح الباركود</h3><div id="qrReader" style="width:100%"></div><button class="btn btn-red" style="width:100%;margin-top:8px" onclick="stopScanner()">إلغاء</button></div></div>
 
 <script>
-var APP_BUILD = 20;
+var APP_BUILD = 22;
 var firebaseConfig = {
   apiKey: "AIzaSyDIp3OlRAP0Wa7Ea1W87NZkYAwOe0xueSQ",
   authDomain: "casheir-840ee.firebaseapp.com",
@@ -426,7 +426,7 @@ function renderCashier(){
     return;
   }
   var st=calcShiftStats(sh);
-  c.innerHTML=pdTxt+'<div class="banner"><div>🟢 شيفت مفتوح منذ '+fdate(sh.startTime)+'</div><div>افتتاحي: <b>'+money(sh.openingAmount)+'</b></div><div>مبيعات نقدي: <b>'+money(st.cashSalesTotal)+'</b></div><div>'+(isAdmin()?'الدرج المتوقع: <b>'+money(st.expected)+'</b>':'<button class="btn btn-or btn-sm" onclick="revealDrawer()">🔓 رصيد الدرج</button>')+'</div><button class="btn btn-red" onclick="openEndShift()">🔒 إنهاء الشيفت</button></div>'+
+  c.innerHTML=pdTxt+'<div class="banner"><div>🟢 شيفت مفتوح منذ '+fdate(sh.startTime)+'</div><div>افتتاحي: <b>'+money(sh.openingAmount)+'</b></div>'+(isAdmin()?'<div>مبيعات نقدي: <b>'+money(st.cashSalesTotal)+'</b></div>':'')+'<div>'+(isAdmin()?'الدرج المتوقع: <b>'+money(st.expected)+'</b>':'<button class="btn btn-or btn-sm" onclick="revealDrawer()">🔓 رصيد الدرج</button>')+'</div><button class="btn btn-red" onclick="openEndShift()">🔒 إنهاء الشيفت</button></div>'+
   '<div class="split"><div class="cartPanel panel"><h3>🧾 الفاتورة</h3><div id="cartItems"></div>'+
   '<div class="row"><label>خصم %</label><input type="number" id="discIn" value="'+DISC+'" min="0" max="100" style="width:80px" oninput="DISC=num(this.value);renderTotals()"><label>ضريبة %</label><input type="number" id="taxIn" value="'+TAX+'" min="0" style="width:80px" oninput="TAX=num(this.value);renderTotals()"></div>'+
   '<div class="row"><label>الدفع</label><select onchange="PAYM=this.value">'+Object.keys(PAY).map(function(k){return '<option value="'+k+'"'+(PAYM===k?' selected':'')+'>'+PAY[k]+'</option>';}).join('')+'</select></div>'+
@@ -768,11 +768,11 @@ function renderWallets(){
   var comToday=comOps.filter(function(t){return isToday(t.date);}).reduce(function(a,t){return a+num(t.commission);},0);
   var comMonth=comOps.filter(function(t){return monthKey(t.date)===mk;}).reduce(function(a,t){return a+num(t.commission);},0);
   $('content').innerHTML='<div class="cards">'+card('🔴 فودافون كاش',money(w.vodafone),'red')+card('🔵 انستاباي',money(w.instapay),'blue')+card('💰 عمولات اليوم',money(comToday),'or')+card('💰 عمولات الشهر',money(comMonth),'or')+'</div>'+
-  '<div class="panel"><h3>💳 عملية جديدة</h3><div class="row"><select id="wlW" onchange="wlPrev()"><option value="vodafone">فودافون كاش</option><option value="instapay">انستاباي</option></select><select id="wlOp" onchange="wlPrev()"><option value="withdraw">سحب / تحويل (ينقص رصيد المحفظة، العميل يدفع كاش + عمولة)</option><option value="deposit">إيداع (يزيد رصيد المحفظة وينقص الدرج، والعمولة تدخل الدرج)</option></select><input type="number" id="wlAmt" placeholder="المبلغ" step="0.01" min="0" oninput="wlPrev()"><input type="number" id="wlCom" placeholder="العمولة (اكتبها يدوي)" step="0.01" min="0" oninput="wlPrev()"><button class="btn" onclick="submitWalletOp()">تنفيذ</button></div><div id="wlPrev" class="hint ok"></div>'+
+  '<div class="panel"><h3>💳 عملية جديدة</h3><div class="row"><select id="wlW" onchange="wlPrev()"><option value="vodafone">فودافون كاش</option><option value="instapay">انستاباي</option></select><select id="wlOp" onchange="wlPrev()"><option value="deposit">العميل هيحول (يزيد رصيد المحفظة، وينقص الدرج، والعمولة تدخل الدرج)</option><option value="withdraw">هحوله (ينقص رصيد المحفظة، ويزيد الدرج بالمبلغ + العمولة)</option></select><input type="number" id="wlAmt" placeholder="المبلغ" step="0.01" min="0" oninput="wlPrev()"><input type="number" id="wlCom" placeholder="العمولة (اكتبها يدوي)" step="0.01" min="0" oninput="wlPrev()"><button class="btn" onclick="submitWalletOp()">تنفيذ</button></div><div id="wlPrev" class="hint ok"></div>'+
   (isAdmin()?'<button class="btn btn-or btn-sm" onclick="submitWalletAdjust(\'vodafone\')">تعديل رصيد فودافون</button> <button class="btn btn-or btn-sm" onclick="submitWalletAdjust(\'instapay\')">تعديل رصيد انستاباي</button>':'')+'</div>'+
   '<div class="panel"><div class="row"><h3 style="margin:0;flex:1">سجل العمليات</h3><button class="btn btn-blue btn-sm" onclick="exportWallets()">📥 Excel</button></div>'+
   tbl(['التاريخ','المحفظة','العملية','المبلغ','العمولة','أثر الدرج','بواسطة','ملاحظة'],tx.map(function(t){
-    var op={withdraw:'سحب/تحويل',deposit:'إيداع',sale:'بيع',adjust:'تعديل رصيد',expense:'سداد (مورد/مصروف)',transfer_in:'تحويل وارد',transfer_out:'تحويل صادر'}[t.operation]||t.operation;
+    var op={withdraw:'هحوله',deposit:'العميل هيحول',sale:'بيع',adjust:'تعديل رصيد',expense:'سداد (مورد/مصروف)',transfer_in:'تحويل وارد',transfer_out:'تحويل صادر'}[t.operation]||t.operation;
     var de=drawerEffect(t);
     var deTxt=(t.operation==='withdraw'||t.operation==='deposit')?'<b style="color:'+(de>=0?'#2e7d32':'#c62828')+'">'+(de>=0?'+':'')+money(de)+'</b>':'-';
     return '<tr><td>'+fdate(t.date)+'</td><td>'+(t.wallet==='vodafone'?'فودافون':'انستاباي')+'</td><td>'+op+'</td><td>'+money(t.amount)+'</td><td>'+money(t.commission)+'</td><td>'+deTxt+'</td><td>'+esc(t.user)+'</td><td>'+esc(t.note||'')+'</td></tr>';
@@ -781,8 +781,8 @@ function renderWallets(){
 function wlPrev(){
   var a=num($('wlAmt').value), op=$('wlOp').value, el=$('wlPrev'); if(!a){el.textContent='';return;}
   var c=num($('wlCom').value);
-  if(op==='withdraw')el.textContent='العميل يدفع: '+money(a+c)+' (المبلغ '+money(a)+' + عمولة '+money(c)+') — الدرج يزيد '+money(a+c);
-  else el.textContent='ينزل من الدرج: '+money(a)+' + عمولة تدخل الدرج '+money(c)+' ← صافي أثر الدرج: '+money(c-a);
+  if(op==='withdraw')el.textContent='هحوله: رصيد المحفظة ينقص '+money(a)+' — العميل يدفع كاش '+money(a+c)+' (المبلغ + عمولة '+money(c)+') ← الدرج يزيد '+money(a+c);
+  else el.textContent='العميل هيحول: رصيد المحفظة يزيد '+money(a)+' — ينزل من الدرج '+money(a)+' + عمولة تدخل الدرج '+money(c)+' ← صافي أثر الدرج: '+money(c-a);
 }
 var WL_BUSY=false;
 function submitWalletOp(){
