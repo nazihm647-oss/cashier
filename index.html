@@ -121,7 +121,7 @@ label.lb{font-weight:700;font-size:14px}
 <div id="scanOverlay"><div class="modal"><h3>📷 مسح الباركود</h3><div id="qrReader" style="width:100%"></div><button class="btn btn-red" style="width:100%;margin-top:8px" onclick="stopScanner()">إلغاء</button></div></div>
 
 <script>
-var APP_BUILD = 24;
+var APP_BUILD = 27;
 var firebaseConfig = {
   apiKey: "AIzaSyDIp3OlRAP0Wa7Ea1W87NZkYAwOe0xueSQ",
   authDomain: "casheir-840ee.firebaseapp.com",
@@ -165,7 +165,7 @@ function defaultValueFor(k){
   return [];
 }
 function load(k){ var v=_dataCache[k]; return (v===undefined||v===null)?defaultValueFor(k):v; }
-function save(k,v){ _dataCache[k]=v; return db.collection(COL).doc(k).set({v:v,updatedAt:Date.now()}); }
+function save(k,v){ if(k==='cashier_products')syncLoose(v); _dataCache[k]=v; return db.collection(COL).doc(k).set({v:v,updatedAt:Date.now()}); }
 function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 
 function nextCounter(key,start){
@@ -222,6 +222,7 @@ db.collection(COL).onSnapshot(function(snap){
     if(ch.type==='removed') delete _dataCache[ch.doc.id];
     else { var d=ch.doc.data(); _dataCache[ch.doc.id]=d.v; }
   });
+  if(_dataCache.cashier_products)syncLoose(_dataCache.cashier_products);
   if(!DATA_READY && (!snap.metadata.fromCache || snap.size>0)) dataReady();
   else if(DATA_READY) refreshCurrentView();
 },function(err){ console.error(err); dataReady(); });
@@ -360,10 +361,10 @@ function duplicateBarcodes(){
 /* ========== Shift ========== */
 function getOpenShift(){ return load('cashier_shifts').filter(function(s){return s.cashierName===me()&&!s.closed;})[0]||null; }
 function calcShiftStats(sh){
-  var r={cashSalesTotal:0,walletCashTotal:0,expensesTotal:0,returnsTotal:0,expected:0,salesCount:0,otherIn:0};
+  var r={cashSalesTotal:0,walletCashTotal:0,expensesTotal:0,returnsTotal:0,expected:0,salesCount:0,otherIn:0,nonCash:{}};
   if(!sh)return r;
   try{
-    load('cashier_sales').forEach(function(s){ if(s.shiftId===sh.id){r.salesCount++; if(!s.paymentMethod||s.paymentMethod==='cash')r.cashSalesTotal+=num(s.total);} });
+    load('cashier_sales').forEach(function(s){ if(s.shiftId===sh.id){r.salesCount++; if(!s.paymentMethod||s.paymentMethod==='cash')r.cashSalesTotal+=num(s.total); else r.nonCash[s.paymentMethod]=(r.nonCash[s.paymentMethod]||0)+num(s.total);} });
     load('cashier_sp_sales').forEach(function(s){ if(s.shiftId===sh.id&&s.paymentMethod==='cash'){r.salesCount++; r.cashSalesTotal+=num(s.total);} });
     load('cashier_customer_payments').forEach(function(x){ if(x.shiftId===sh.id&&x.dest==='drawer')r.otherIn+=num(x.amount); });
     load('cashier_emp_advances').forEach(function(x){ if(x.type==='repay'&&x.method==='drawer'&&x.shiftId===sh.id)r.otherIn+=num(x.amount); });
@@ -484,13 +485,14 @@ var EDIT_PROD_ID=null;
 function renderProducts(){
   var dups=duplicateBarcodes(), l=load('cashier_products');
   var warn=dups.length?'<div class="warnbox">⚠️ <b>باركودات مكررة (لازم تتصلح يدوياً):</b><br>'+dups.map(function(d){return 'باركود '+esc(d.barcode)+': '+d.products.map(function(p){return esc(p.name);}).join(' ، ');}).join('<br>')+'</div>':'';
-  $('content').innerHTML=warn+'<div class="panel"><div class="row"><h3 style="margin:0;flex:1">🛒 المنتجات ('+l.length+')</h3><input id="prodSearch" placeholder="بحث..." oninput="filterProdRows()"><select onchange="setProdCat(this.value)">'+catOptions(PROD_CAT,true)+'</select><button class="btn btn-gray" onclick="openCategories()">🗂️ الفئات</button><button class="btn" onclick="openProductModal()">➕ منتج جديد</button><button class="btn btn-blue" onclick="exportProducts()">📥 Excel</button><button class="btn btn-or" onclick="openProductsImport()">📤 رفع من Excel</button></div>'+
+  $('content').innerHTML=warn+'<div class="panel"><div class="row"><h3 style="margin:0;flex:1">🛒 المنتجات ('+l.length+')</h3><input id="prodSearch" placeholder="بحث..." oninput="filterProdRows()"><select onchange="setProdCat(this.value)">'+catOptions(PROD_CAT,true)+'</select><button class="btn btn-gray" onclick="openCategories()">🗂️ الفئات</button><button class="btn" onclick="openProductModal()">➕ منتج جديد</button><button class="btn btn-or" onclick="openLooseModal()">🚬 منتج فرط</button><button class="btn btn-blue" onclick="exportProducts()">📥 Excel</button><button class="btn btn-or" onclick="openProductsImport()">📤 رفع من Excel</button></div>'+
   tbl(['الاسم','الفئة','الباركود','التكلفة','السعر','المخزون','حد التنبيه','تاريخ الإضافة','إجراء'],l.filter(function(p){return !PROD_CAT||p.category===PROD_CAT;}).map(function(p){
-    return '<tr class="prow '+stockCls(p)+'" data-s="'+esc((p.name+' '+normBC(p.barcode)+' '+(p.category||'')).toLowerCase())+'"><td>'+esc(p.name)+'</td><td>'+(p.category?bd(esc(p.category),'b'):'-')+'</td><td>'+esc(p.barcode||'-')+'</td><td>'+money(p.costPrice)+'</td><td>'+money(p.price)+'</td><td>'+num(p.stock)+'</td><td>'+num(p.minStock==null?5:p.minStock)+'</td><td>'+fdate(p.dateAdded)+'</td><td><button class="btn btn-sm btn-blue" onclick="openProductModal(\''+p.id+'\')">تعديل</button> '+(isAdmin()?'<button class="btn btn-sm btn-red" onclick="deleteProduct(\''+p.id+'\')">حذف</button>':'')+'</td></tr>';
+    return '<tr class="prow '+stockCls(p)+'" data-s="'+esc((p.name+' '+normBC(p.barcode)+' '+(p.category||'')).toLowerCase())+'"><td>'+esc(p.name)+(p.looseOf?' '+bd('فرط ÷'+num(p.perPack),'b'):'')+'</td><td>'+(p.category?bd(esc(p.category),'b'):'-')+'</td><td>'+esc(p.barcode||'-')+'</td><td>'+money(p.costPrice)+'</td><td>'+money(p.price)+'</td><td>'+num(p.stock)+'</td><td>'+num(p.minStock==null?5:p.minStock)+'</td><td>'+fdate(p.dateAdded)+'</td><td><button class="btn btn-sm btn-blue" onclick="openProductModal(\''+p.id+'\')">تعديل</button> '+(isAdmin()?'<button class="btn btn-sm btn-red" onclick="deleteProduct(\''+p.id+'\')">حذف</button>':'')+'</td></tr>';
   }))+'</div>';
 }
 function filterProdRows(){ var q=$('prodSearch').value.trim().toLowerCase(); document.querySelectorAll('.prow').forEach(function(r){r.style.display=(!q||r.getAttribute('data-s').indexOf(q)>=0)?'':'none';}); }
 function openProductModal(id){
+  var _p=id?load('cashier_products').filter(function(x){return x.id===id;})[0]:null; if(_p&&_p.looseOf)return openLooseModal(id);
   EDIT_PROD_ID=id||null;
   var p=id?load('cashier_products').filter(function(x){return x.id===id;})[0]:null; p=p||{};
   openModal(id?'✏️ تعديل منتج':'➕ منتج جديد',
@@ -512,7 +514,7 @@ function deleteProduct(id){
   save('cashier_products',load('cashier_products').filter(function(p){return p.id!==id;})); renderProducts();
 }
 function exportProducts(){
-  xl('المنتجات.xlsx',[{name:'المنتجات',rows:load('cashier_products').map(function(p){return {'الاسم':p.name,'الباركود':p.barcode||'','سعر التكلفة':num(p.costPrice),'سعر البيع':num(p.price),'المخزون':num(p.stock),'حد التنبيه':num(p.minStock==null?5:p.minStock),'تاريخ الإضافة':fdate(p.dateAdded)};})}]);
+  xl('المنتجات.xlsx',[{name:'المنتجات',rows:load('cashier_products').map(function(p){return {'الاسم':p.name,'الفئة':p.category||'','الباركود':p.barcode||'','سعر التكلفة':num(p.costPrice),'سعر البيع':num(p.price),'المخزون':num(p.stock),'حد التنبيه':num(p.minStock==null?5:p.minStock),'تاريخ الإضافة':fdate(p.dateAdded)};})}]);
 }
 
 /* ========== Purchases ========== */
@@ -746,9 +748,9 @@ function submitReturn(){
   var pre=(src==='safe')?adjustSafeBalance(-refund,{type:'return',description:'مرتجع '+p.name}):Promise.resolve();
   pre.then(function(){
     var prods=load('cashier_products'), pr=prods.filter(function(x){return x.id===id;})[0], before=num(pr.stock);
-    if(res){ pr.stock=before+qty; save('cashier_products',prods); logAdjust(pr,before,pr.stock,'مرتجع صالح'+(reason?' - '+reason:'')); }
+    if(res){ pr.stock=before+qty; if(pr.looseOf)pr.looseOpen=num(pr.looseOpen)+qty; save('cashier_products',prods); logAdjust(pr,before,pr.stock,'مرتجع صالح'+(reason?' - '+reason:'')); }
     else {
-      pr.stock=before-qty; save('cashier_products',prods); logAdjust(pr,before,pr.stock,'مرتجع تالف'+(reason?' - '+reason:''));
+      if(pr.looseOf){deductStock(prods,pr.id,qty);syncLoose(prods);}else pr.stock=before-qty; save('cashier_products',prods); logAdjust(pr,before,pr.stock,'مرتجع تالف'+(reason?' - '+reason:''));
       var dm=load('cashier_damages'); dm.push({id:genId(),productId:id,productName:p.name,qty:qty,lossValue:r2(num(p.costPrice)*qty),reason:'مرتجع غير صالح'+(reason?' - '+reason:''),processedBy:me(),date:new Date().toISOString()}); save('cashier_damages',dm);
     }
     var rs=load('cashier_returns'); rs.push({id:genId(),productId:id,productName:p.name,qty:qty,price:num(p.price),costPrice:num(p.costPrice),refundAmount:refund,source:src,resalable:res,reason:reason,shiftId:sh?sh.id:null,processedBy:me(),date:new Date().toISOString()}); save('cashier_returns',rs);
@@ -860,7 +862,7 @@ function countDiffHtml(p,v){
   return d>0?bd('زيادة +'+d,'g'):bd('نقص '+d,'r');
 }
 function renderCountEntry(){
-  var l=load('cashier_products');
+  var l=load('cashier_products').filter(function(p){return !p.looseOf;});
   var html='<div class="tot" id="cntProg"></div>'+
   '<div class="row"><input id="cntReason" value="'+esc(COUNT.reason)+'" oninput="COUNT.reason=this.value" placeholder="بيان الجرد" style="flex:1"><input id="cntSearch" placeholder="🔎 بحث عن منتج..." value="'+esc(COUNT.q)+'" oninput="COUNT.q=this.value;filterCountRows()" style="flex:1"></div>'+
   '<p style="font-size:13px;color:#555;margin:0 0 6px">اكتب الكمية الفعلية لكل منتج عدّيته. المنتج الفاضي = لم يُجرد (ولن يتغير). بعد الانتهاء اضغط "مراجعة النتائج" لمعرفة غير المجرود والفروق قبل إقفال الجرد.</p>'+
@@ -888,7 +890,7 @@ function filterCountRows(){
   document.querySelectorAll('.cntRow').forEach(function(r){r.style.display=(!q||r.getAttribute('data-s').indexOf(q)>=0)?'':'none';});
 }
 function computeCount(){
-  var prods=load('cashier_products'), items=[], unc=[], same=0;
+  var prods=load('cashier_products').filter(function(p){return !p.looseOf;}), items=[], unc=[], same=0;
   prods.forEach(function(p){
     var v=COUNT.entries[p.id];
     if(v===undefined){unc.push({productId:p.id,name:p.name,stock:num(p.stock),costPrice:num(p.costPrice),barcode:p.barcode||''});return;}
@@ -1323,7 +1325,7 @@ function openProductsImport(){
   openModal('📤 رفع منتجات من Excel','<p style="font-size:13px;line-height:1.7">الأعمدة المقبولة: <b>الاسم</b> (إجباري) — الباركود — سعر التكلفة — سعر البيع — المخزون — حد التنبيه — الفئة.<br>لو الباركود (أو الاسم) موجود بيتحدّث المنتج بالأعمدة المكتوبة فقط، والباقي بيتضاف كمنتجات جديدة. بتشوف معاينة قبل التنفيذ.</p><input type="file" id="pImpFile" accept=".xlsx,.xls,.csv"><button class="btn" onclick="previewProductsImport()">🔎 معاينة</button><button class="btn btn-gray" onclick="downloadProductsTemplate()">⬇️ نموذج Excel</button><div id="pImpOut"></div>');
 }
 function downloadProductsTemplate(){
-  xl('نموذج_المنتجات.xlsx',[{name:'المنتجات',rows:[{'الاسم':'مثال: عصير','الباركود':'6221234567890','سعر التكلفة':8,'سعر البيع':10,'المخزون':24,'حد التنبيه':5}]}]);
+  xl('نموذج_المنتجات.xlsx',[{name:'المنتجات',rows:[{'الاسم':'مثال: عصير','الفئة':'مشروبات','الباركود':'6221234567890','سعر التكلفة':8,'سعر البيع':10,'المخزون':24,'حد التنبيه':5}]}]);
 }
 function previewProductsImport(){
   readSheetFile('pImpFile',function(rows){
@@ -1517,8 +1519,8 @@ function processCheckout(){
     if(cust){sale.customerId=cust.id;sale.customerName=cust.name;}
     var prods=load('cashier_products');
     items.forEach(function(i){
-      if(i.components){ i.components.forEach(function(c){ prods.forEach(function(p){ if(p.id===c.productId)p.stock=num(p.stock)-num(c.qty)*i.qty; }); }); }
-      else prods.forEach(function(p){ if(p.id===i.productId)p.stock=num(p.stock)-i.qty; });
+      if(i.components){ i.components.forEach(function(c){ deductStock(prods,c.productId,num(c.qty)*i.qty); }); }
+      else deductStock(prods,i.productId,i.qty);
     });
     save('cashier_products',prods);
     var sales=load('cashier_sales'); sales.push(sale); save('cashier_sales',sales);
@@ -1808,7 +1810,8 @@ function confirmRevealDrawer(){
   if(!u||String(u.password)!==$('rvPass').value){alert('كلمة المرور غير صحيحة');return;}
   $('rvPass').value='';
   var st=calcShiftStats(getOpenShift());
-  $('rvOut').innerHTML='<div class="tot">افتتاحي: '+money(getOpenShift().openingAmount)+'<br>مبيعات نقدي: '+money(st.cashSalesTotal)+'<div class="big">رصيد الدرج المتوقع: '+money(st.expected)+'</div></div>';
+  var sh=getOpenShift(), nc=Object.keys(st.nonCash).map(function(k){return payLbl(k)+': '+money(st.nonCash[k]);}).join(' | ');
+  $('rvOut').innerHTML='<div class="tot">افتتاحي: '+money(sh.openingAmount)+'<br>عدد الفواتير في الشيفت: '+st.salesCount+'<br>مبيعات نقدي: '+money(st.cashSalesTotal)+(nc?'<br><small>مبيعات غير نقدية (مبتدخلش الدرج): '+nc+'</small>':'')+'<br>أثر المحافظ (تحويل/سحب): '+money(st.walletCashTotal)+'<br>مصروفات من الدرج: −'+money(st.expensesTotal)+'<br>مرتجعات من الدرج: −'+money(st.returnsTotal)+(st.otherIn?'<br>تحصيلات في الدرج: '+money(st.otherIn):'')+'<div class="big">رصيد الدرج المتوقع: '+money(st.expected)+'</div></div>';
 }
 
 /* ---------- suppliers account ---------- */
@@ -2192,6 +2195,70 @@ function saveSupplierEdit(id){
     var ds=load('cashier_disbursements'); ds.forEach(function(d){if(d.supplierId===id)d.supplierName=n;}); save('cashier_disbursements',ds);
   }
   closeModal(); renderSuppliers();
+}
+
+
+/* ---------- loose units (الفرط): e.g. cigarettes ---------- */
+function syncLoose(list){
+  if(!Array.isArray(list))return;
+  var byId={}; list.forEach(function(p){byId[p.id]=p;});
+  list.forEach(function(p){
+    if(!p.looseOf)return;
+    var par=byId[p.looseOf]; if(!par)return;
+    var n=num(p.perPack)||1;
+    p.stock=r2(num(p.looseOpen)+num(par.stock)*n);
+    p.costPrice=r2(num(par.costPrice)/n);
+  });
+}
+function deductStock(prods,id,q){
+  q=num(q); var p=prods.filter(function(x){return x.id===id;})[0]; if(!p||q===0)return;
+  if(p.looseOf){
+    var par=prods.filter(function(x){return x.id===p.looseOf;})[0], n=num(p.perPack)||1;
+    if(!par){p.stock=num(p.stock)-q;return;}
+    var open=num(p.looseOpen), guard=0;
+    while(open<q&&guard++<1000){ par.stock=num(par.stock)-1; open=r2(open+n); }
+    p.looseOpen=r2(open-q);
+    syncLoose(prods);
+  } else p.stock=num(p.stock)-q;
+}
+function openLooseModal(id){
+  var prods=load('cashier_products'), p=id?prods.filter(function(x){return x.id===id;})[0]:null; p=p||{};
+  var parents=prods.filter(function(x){return !x.looseOf;});
+  openModal(id?'✏️ تعديل منتج فرط':'🚬 منتج فرط جديد','<p style="font-size:13px;line-height:1.7;margin:0 0 6px">المنتج الفرط بيسحب من العلبة الأصلية: أول سيجارة بتتباع بتفتح علبة (تنقص من مخزون العلبة)، وبعدها بيخصم من اللي في العلبة المفتوحة، ولما تخلص بيفتح علبة جديدة تلقائي.</p>'+
+   '<label class="lb">المنتج الأصلي (العلبة)</label><select id="lsPar" onchange="lsAuto()"><option value="">— اختر —</option>'+parents.map(function(x){return '<option value="'+x.id+'"'+(p.looseOf===x.id?' selected':'')+'>'+esc(x.name)+' — مخزون '+num(x.stock)+'</option>';}).join('')+'</select>'+
+   '<label class="lb">اسم المنتج الفرط</label><input id="lsName" value="'+esc(p.name||'')+'">'+
+   '<div class="row"><div style="flex:1"><label class="lb">عدد الوحدات في العلبة</label><input type="number" id="lsPer" min="1" value="'+(p.perPack||20)+'" oninput="lsAuto()"></div><div style="flex:1"><label class="lb">سعر بيع الواحدة</label><input type="number" id="lsPrice" step="0.01" min="0" value="'+(p.price!=null?p.price:'')+'"></div></div>'+
+   '<div id="lsHint" class="hint ok"></div>'+
+   '<label class="lb">الفئة</label><select id="lsCat">'+catOptions(p.category||'')+'</select>'+
+   '<label class="lb">الباركود (اختياري)</label><input id="lsBc" value="'+esc(p.barcode||'')+'">'+
+   (id?'<div class="tot">المتاح حالياً: <b>'+num(p.stock)+'</b> وحدة (منها '+num(p.looseOpen)+' في علبة مفتوحة)</div>':'')+
+   '<button class="btn" onclick="saveLoose(\''+(id||'')+'\')">💾 حفظ</button>'+(id?' <button class="btn btn-red" onclick="deleteLoose(\''+id+'\')">حذف</button>':''));
+  setTimeout(lsAuto,30);
+}
+function lsAuto(){
+  var par=prodById($('lsPar').value), n=num($('lsPer').value)||1, h=$('lsHint'); if(!h)return;
+  if(!par){h.textContent='';return;}
+  if(!$('lsName').value.trim())$('lsName').value=par.name+' فرط';
+  if(!$('lsCat').value&&par.category)$('lsCat').value=par.category;
+  h.textContent='تكلفة الواحدة: '+money(num(par.costPrice)/n)+' — سعر العلبة: '+money(par.price)+' ('+money(num(par.price)/n)+' للواحدة)';
+}
+function saveLoose(id){
+  var parId=$('lsPar').value, name=$('lsName').value.trim(), per=num($('lsPer').value), price=num($('lsPrice').value), bc=normBC($('lsBc').value);
+  if(!parId){alert('اختر المنتج الأصلي');return;}
+  if(!name){alert('اكتب اسم المنتج');return;}
+  if(per<1){alert('عدد الوحدات لازم 1 أو أكتر');return;}
+  if(price<=0){alert('اكتب سعر الواحدة');return;}
+  if(bc){var o=findByBarcode(bc,id||null); if(o){alert('❌ الباركود مستخدم للمنتج: '+o.name);return;}}
+  var l=load('cashier_products');
+  if(id){ l.forEach(function(p){ if(p.id===id){ p.name=name; p.looseOf=parId; p.perPack=per; p.price=price; p.barcode=bc; p.category=$('lsCat').value; } }); }
+  else l.push({id:genId(),name:name,category:$('lsCat').value,barcode:bc,price:price,costPrice:0,stock:0,minStock:5,looseOf:parId,perPack:per,looseOpen:0,dateAdded:new Date().toISOString()});
+  save('cashier_products',l); closeModal(); renderProducts();
+}
+function deleteLoose(id){
+  if(!confirm('حذف المنتج الفرط؟'))return;
+  var p=prodById(id), open=p?num(p.looseOpen):0;
+  if(open>0&&!confirm('فيه '+open+' وحدة في علبة مفتوحة، هتتحذف مع المنتج. متابعة؟'))return;
+  save('cashier_products',load('cashier_products').filter(function(x){return x.id!==id;})); closeModal(); renderProducts();
 }
 
 </script>
