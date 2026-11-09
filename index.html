@@ -121,7 +121,7 @@ label.lb{font-weight:700;font-size:14px}
 <div id="scanOverlay"><div class="modal"><h3>📷 مسح الباركود</h3><div id="qrReader" style="width:100%"></div><button class="btn btn-red" style="width:100%;margin-top:8px" onclick="stopScanner()">إلغاء</button></div></div>
 
 <script>
-var APP_BUILD = 27;
+var APP_BUILD = 29;
 var firebaseConfig = {
   apiKey: "AIzaSyDIp3OlRAP0Wa7Ea1W87NZkYAwOe0xueSQ",
   authDomain: "casheir-840ee.firebaseapp.com",
@@ -165,9 +165,87 @@ function defaultValueFor(k){
   return [];
 }
 function load(k){ var v=_dataCache[k]; return (v===undefined||v===null)?defaultValueFor(k):v; }
-function save(k,v){ if(k==='cashier_products')syncLoose(v); _dataCache[k]=v; return db.collection(COL).doc(k).set({v:v,updatedAt:Date.now()}); }
+var _base={}, _pend={}, _chain={};
+var DELTA_FIELDS={stock:1,looseOpen:1,paidAmount:1};
+function jclone(x){return x===undefined?undefined:JSON.parse(JSON.stringify(x));}
+function isIdArr(a){return Array.isArray(a)&&a.every(function(x){return x&&typeof x==='object'&&!Array.isArray(x)&&x.id!==undefined&&x.id!==null;});}
+function diffArr(base,cur){
+  var bm={},cm={},ops={add:[],del:[],mod:[]};
+  base.forEach(function(x){bm[x.id]=x;}); cur.forEach(function(x){cm[x.id]=x;});
+  cur.forEach(function(x){
+    if(!(x.id in bm))ops.add.push(jclone(x));
+    else{ var f=diffObj(bm[x.id],x); if(f)ops.mod.push({id:x.id,f:f}); }
+  });
+  base.forEach(function(x){ if(!(x.id in cm))ops.del.push(x.id); });
+  return (ops.add.length||ops.del.length||ops.mod.length)?ops:null;
+}
+function diffObj(b,c){
+  var f={},any=false,k;
+  for(k in c){
+    if(JSON.stringify(b[k])===JSON.stringify(c[k]))continue;
+    if(DELTA_FIELDS[k]){ var d=num(c[k])-num(b[k]); if(d!==0){f[k]={d:d};any=true;} }
+    else if(isIdArr(b[k])&&isIdArr(c[k])){ var o=diffArr(b[k],c[k]); if(o){f[k]={a:o};any=true;} }
+    else { f[k]={s:jclone(c[k])}; any=true; }
+  }
+  for(k in b){ if(!(k in c)){ f[k]={x:1}; any=true; } }
+  return any?f:null;
+}
+function applyArr(L,ops){
+  if(ops.del.length){ var del={}; ops.del.forEach(function(i){del[i]=1;}); for(var i=L.length-1;i>=0;i--){ if(del[L[i].id])L.splice(i,1); } }
+  ops.mod.forEach(function(m){ var it=L.filter(function(x){return x.id===m.id;})[0]; if(it)applyObj(it,m.f); });
+  ops.add.forEach(function(a){ if(!L.some(function(x){return x.id===a.id;}))L.push(jclone(a)); });
+}
+function applyObj(it,f){
+  Object.keys(f).forEach(function(k){
+    var o=f[k];
+    if(o.s!==undefined)it[k]=jclone(o.s);
+    else if(o.x)delete it[k];
+    else if(o.d!==undefined)it[k]=Math.round((num(it[k])+o.d)*10000)/10000;
+    else if(o.a){ if(!Array.isArray(it[k]))it[k]=[]; applyArr(it[k],o.a); }
+  });
+}
+function save(k,v){
+  if(k==='cashier_products')syncLoose(v);
+  var base=_base[k];
+  if(base===undefined&&!(k in _dataCache)&&Array.isArray(defaultValueFor(k)))base=[];
+  var ops=null, plain=true;
+  if(Array.isArray(v)&&Array.isArray(base)&&isIdArr(v)&&isIdArr(base)){ plain=false; ops=diffArr(base,v); }
+  _dataCache[k]=v; _base[k]=jclone(v);
+  if(!plain&&!ops)return Promise.resolve();
+  var ref=db.collection(COL).doc(k), merged=null;
+  function plainSet(){ merged=v; return ref.set({v:v,updatedAt:Date.now()}); }
+  function job(){
+    if(plain)return plainSet();
+    return db.runTransaction(function(t){
+      return t.get(ref).then(function(snap){
+        var L=snap.exists&&Array.isArray(snap.data().v)?snap.data().v:[];
+        applyArr(L,ops); if(k==='cashier_products')syncLoose(L);
+        t.set(ref,{v:L,updatedAt:Date.now()}); merged=L;
+      });
+    }).catch(function(e){ console.error('tx fallback',k,e); return plainSet(); });
+  }
+  _pend[k]=(_pend[k]||0)+1;
+  var p=(_chain[k]||Promise.resolve()).then(job,job);
+  _chain[k]=p.catch(function(){});
+  return p.then(function(){ finishSave(k,merged); },function(e){ _pend[k]--; throw e; });
+}
+function finishSave(k,merged){
+  _pend[k]--;
+  if(_pend[k]===0&&merged){ _dataCache[k]=merged; _base[k]=jclone(merged); if(DATA_READY)refreshCurrentView(); }
+}
 function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 
+/* atomic read-modify-write on an array document (avoids lost updates between devices) */
+function txMutate(key,fn){
+  var ref=db.collection(COL).doc(key), out=null;
+  return db.runTransaction(function(t){
+    return t.get(ref).then(function(snap){
+      var v=snap.exists?snap.data().v:null; if(!Array.isArray(v))v=[];
+      fn(v); if(key==='cashier_products')syncLoose(v);
+      t.set(ref,{v:v,updatedAt:Date.now()}); out=v;
+    });
+  }).then(function(){ _dataCache[key]=out; _base[key]=jclone(out); return out; });
+}
 function nextCounter(key,start){
   var ref=db.collection(COL).doc(key);
   return db.runTransaction(function(t){
@@ -220,9 +298,9 @@ function adjustWalletBalance(wallet,delta,tx){
 db.collection(COL).onSnapshot(function(snap){
   snap.docChanges().forEach(function(ch){
     if(ch.type==='removed') delete _dataCache[ch.doc.id];
-    else { var d=ch.doc.data(); _dataCache[ch.doc.id]=d.v; }
+    else if(!_pend[ch.doc.id]){ var d=ch.doc.data(); _dataCache[ch.doc.id]=d.v; _base[ch.doc.id]=jclone(d.v); }
   });
-  if(_dataCache.cashier_products)syncLoose(_dataCache.cashier_products);
+  if(_dataCache.cashier_products&&!_pend.cashier_products)syncLoose(_dataCache.cashier_products);
   if(!DATA_READY && (!snap.metadata.fromCache || snap.size>0)) dataReady();
   else if(DATA_READY) refreshCurrentView();
 },function(err){ console.error(err); dataReady(); });
@@ -804,9 +882,8 @@ function submitWalletOp(){
 }
 function submitWalletAdjust(w){
   if(!isAdmin())return; var v=prompt('الرصيد الجديد للمحفظة:'); if(v===null||v===''||isNaN(parseFloat(v)))return;
-  var ws=load('cashier_wallets'), nb=r2(v), diff=r2(nb-num(ws[w])); ws[w]=nb; save('cashier_wallets',ws);
-  var tx=load('cashier_wallet_transactions'); tx.push({id:genId(),wallet:w,operation:'adjust',amount:diff,commission:0,date:new Date().toISOString(),user:me(),note:'تعديل يدوي'}); save('cashier_wallet_transactions',tx);
-  renderWallets();
+  var diff=r2(r2(v)-num(load('cashier_wallets')[w])); if(!diff)return;
+  adjustWalletBalance(w,diff,{operation:'adjust',amount:diff,commission:0,note:'تعديل يدوي'}).then(renderWallets).catch(function(e){alert('فشل: '+e.message);});
 }
 function exportWallets(){xl('المحافظ.xlsx',[{name:'المحافظ',rows:scoped(load('cashier_wallet_transactions'),'user').map(function(t){return {'التاريخ':fdate(t.date),'المحفظة':t.wallet,'العملية':t.operation,'المبلغ':num(t.amount),'العمولة':num(t.commission),'أثر الدرج':drawerEffect(t),'بواسطة':t.user,'ملاحظة':t.note||''};})}]);}
 
@@ -1517,14 +1594,19 @@ function processCheckout(){
   nextCounter('invoice_counter',1001).then(function(n){
     var sale={id:genId(),invoiceNum:'INV-'+n,date:new Date().toISOString(),items:items,subtotal:t.subtotal,discountPercent:DISC,taxPercent:TAX,total:t.total,soldBy:me(),paymentMethod:pm,shiftId:sh.id,profit:profit};
     if(cust){sale.customerId=cust.id;sale.customerName=cust.name;}
-    var prods=load('cashier_products');
-    items.forEach(function(i){
-      if(i.components){ i.components.forEach(function(c){ deductStock(prods,c.productId,num(c.qty)*i.qty); }); }
-      else deductStock(prods,i.productId,i.qty);
-    });
-    save('cashier_products',prods);
-    var sales=load('cashier_sales'); sales.push(sale); save('cashier_sales',sales);
-    var p=(pm!=='cash'&&pm!=='credit')?adjustWalletBalance(pm,t.total,{operation:'sale',amount:t.total,commission:0,note:sale.invoiceNum}):Promise.resolve();
+    var pRef=db.collection(COL).doc('cashier_products'), sRef=db.collection(COL).doc('cashier_sales'), outP=null, outS=null;
+    var stockP=db.runTransaction(function(t){
+      return Promise.all([t.get(pRef),t.get(sRef)]).then(function(r){
+        var prods=r[0].exists&&Array.isArray(r[0].data().v)?r[0].data().v:[], sales=r[1].exists&&Array.isArray(r[1].data().v)?r[1].data().v:[];
+        items.forEach(function(i){
+          if(i.components){ i.components.forEach(function(c){ deductStock(prods,c.productId,num(c.qty)*i.qty); }); }
+          else deductStock(prods,i.productId,i.qty);
+        });
+        syncLoose(prods); sales.push(sale);
+        t.set(pRef,{v:prods,updatedAt:Date.now()}); t.set(sRef,{v:sales,updatedAt:Date.now()}); outP=prods; outS=sales;
+      });
+    }).then(function(){ _dataCache.cashier_products=outP; _base.cashier_products=jclone(outP); _dataCache.cashier_sales=outS; _base.cashier_sales=jclone(outS); });
+    var p=stockP.then(function(){ return (pm!=='cash'&&pm!=='credit')?adjustWalletBalance(pm,t.total,{operation:'sale',amount:t.total,commission:0,note:sale.invoiceNum}):null; });
     return p.then(function(){return sale;});
   }).then(function(sale){
     CART=[];DISC=0;TAX=0;PAYM='cash';CUST_SEL=''; checkoutBusy=false; renderCashier(); showInvoice(sale);
