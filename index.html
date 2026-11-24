@@ -7,8 +7,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script defer src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}
 body{margin:0;font-family:'Cairo',Arial,sans-serif;background:#f1f8f2;color:#1b3a1f}
@@ -121,7 +121,7 @@ label.lb{font-weight:700;font-size:14px}
 <div id="scanOverlay"><div class="modal"><h3>📷 مسح الباركود</h3><div id="qrReader" style="width:100%"></div><button class="btn btn-red" style="width:100%;margin-top:8px" onclick="stopScanner()">إلغاء</button></div></div>
 
 <script>
-var APP_BUILD = 29;
+var APP_BUILD = 30;
 var firebaseConfig = {
   apiKey: "AIzaSyDIp3OlRAP0Wa7Ea1W87NZkYAwOe0xueSQ",
   authDomain: "casheir-840ee.firebaseapp.com",
@@ -166,6 +166,108 @@ function defaultValueFor(k){
 }
 function load(k){ var v=_dataCache[k]; return (v===undefined||v===null)?defaultValueFor(k):v; }
 var _base={}, _pend={}, _chain={};
+
+/* ---------- sharding: growing logs live in many small docs (day / month) ---------- */
+var SHARD={
+ cashier_sales:{f:'date',g:'d'}, cashier_sp_sales:{f:'date',g:'d'},
+ cashier_wallet_transactions:{f:'date',g:'m'}, cashier_safe_transactions:{f:'date',g:'m'}, cashier_superpay_tx:{f:'date',g:'m'},
+ cashier_stock_adjustments:{f:'date',g:'m'}, cashier_disbursements:{f:'date',g:'m'}, cashier_purchases:{f:'date',g:'m'},
+ cashier_returns:{f:'date',g:'m'}, cashier_damages:{f:'date',g:'m'}, cashier_customer_payments:{f:'date',g:'m'},
+ cashier_supplier_payments:{f:'date',g:'m'}, cashier_emp_advances:{f:'date',g:'m'}, cashier_emp_deductions:{f:'date',g:'m'},
+ cashier_salary_payments:{f:'date',g:'m'}, cashier_shifts:{f:'startTime',g:'m'}
+};
+var _parts={}, _owner={}, _pstr={};
+function shardPart(key,item){
+  var c=SHARD[key], d=String((item&&item[c.f])||new Date().toISOString());
+  if(!/^\d{4}-\d{2}/.test(d))d=new Date().toISOString();
+  return c.g==='d'?d.slice(0,10):d.slice(0,7);
+}
+function shardDocId(key,part){ return part?key+'@'+part:key; }
+function putPart(key,part,arr){
+  (_parts[key]=_parts[key]||{})[part]=arr;
+  var m={}; arr.forEach(function(x){ if(x&&x.id!==undefined&&x.id!==null)m[x.id]=JSON.stringify(x); });
+  (_pstr[key]=_pstr[key]||{})[part]=m;
+}
+function dropPart(key,part){ if(_parts[key])delete _parts[key][part]; if(_pstr[key])delete _pstr[key][part]; }
+function rebuild(key){
+  var parts=_parts[key]||{}, names=Object.keys(parts).sort(), out=[], owner={};
+  names.forEach(function(p){ (parts[p]||[]).forEach(function(x){ if(x&&x.id!==undefined&&x.id!==null)owner[x.id]=p; }); });
+  names.forEach(function(p){ (parts[p]||[]).forEach(function(x){ if(x&&x.id!==undefined&&x.id!==null&&owner[x.id]!==p)return; out.push(x); }); });
+  _dataCache[key]=out; _owner[key]=owner;
+}
+function setPart(key,part,arr){ putPart(key,part,arr); if(!_pend[key]){ rebuild(key); } }
+function saveSharded(k,v){
+  if(!Array.isArray(v)||!isIdArr(v)){ console.error('sharded save needs records with id',k); return Promise.resolve(); }
+  var owner=_owner[k]||{}, pstr=_pstr[k]||{}, groups={}, vmap={};
+  function G(p){ return groups[p]||(groups[p]={add:[],del:[],mod:[]}); }
+  v.forEach(function(x){
+    vmap[x.id]=1; var o=owner[x.id];
+    if(o===undefined){ G(shardPart(k,x)).add.push(jclone(x)); return; }
+    var bs=pstr[o]&&pstr[o][x.id]; if(bs===undefined)return;
+    if(JSON.stringify(x)!==bs){ var f=diffObj(JSON.parse(bs),x); if(f)G(o).mod.push({id:x.id,f:f}); }
+  });
+  Object.keys(owner).forEach(function(id){ if(!vmap[id])G(owner[id]).del.push(id); });
+  _dataCache[k]=v;
+  var ps=Object.keys(groups);
+  if(!ps.length)return Promise.resolve();
+  ps.forEach(function(p){ groups[p].add.forEach(function(a){ owner[a.id]=p; }); }); _owner[k]=owner;
+  var jobs=ps.map(function(p){
+    var ops=groups[p], id=shardDocId(k,p), ref=db.collection(COL).doc(id), merged=null;
+    function plainSet(){
+      var L=jclone((_parts[k]&&_parts[k][p])||[]); applyArr(L,ops); merged=L;
+      return ref.set({v:L,updatedAt:Date.now()});
+    }
+    function job(){
+      return db.runTransaction(function(t){
+        return t.get(ref).then(function(snap){
+          var L=snap.exists&&Array.isArray(snap.data().v)?snap.data().v:[];
+          applyArr(L,ops); t.set(ref,{v:L,updatedAt:Date.now()}); merged=L;
+        });
+      }).catch(function(e){ console.error('tx fallback',id,e); return plainSet(); });
+    }
+    _pend[k]=(_pend[k]||0)+1;
+    var pr=(_chain[id]||Promise.resolve()).then(job,job);
+    _chain[id]=pr.catch(function(){});
+    return pr.then(function(){ _pend[k]--; putPart(k,p,merged); },function(e){ _pend[k]--; throw e; });
+  });
+  return Promise.all(jobs).then(function(){ if(!_pend[k]){ rebuild(k); if(DATA_READY)refreshCurrentView(); } });
+}
+/* one-time move of the old single big docs into small shards (admin only) */
+var MIG_RUN=false;
+function maybeMigrate(){
+  if(MIG_RUN||!DATA_READY||!CURRENT_USER||!isAdmin())return;
+  var keys=Object.keys(SHARD).filter(function(k){ return _parts[k]&&_parts[k]['']&&_parts[k][''].some(function(x){return x&&x.id!==undefined&&x.id!==null;}); });
+  if(!keys.length)return;
+  MIG_RUN=true;
+  keys.reduce(function(p,k){ return p.then(function(){ return migrateKey(k); }); },Promise.resolve())
+   .then(function(){ MIG_RUN=false; }).catch(function(e){ console.error('migration',e); MIG_RUN=false; });
+}
+function migrateKey(key){
+  var legacy=_parts[key][''].filter(function(x){return x&&x.id!==undefined&&x.id!==null;}), groups={};
+  legacy.forEach(function(x){ var p=shardPart(key,x); (groups[p]=groups[p]||[]).push(x); });
+  return Object.keys(groups).reduce(function(pr,p){
+    return pr.then(function(){
+      var ref=db.collection(COL).doc(shardDocId(key,p)), out=null;
+      return db.runTransaction(function(t){
+        return t.get(ref).then(function(snap){
+          var L=snap.exists&&Array.isArray(snap.data().v)?snap.data().v:[], have={}; L.forEach(function(y){have[y.id]=1;});
+          groups[p].forEach(function(a){ if(!have[a.id])L.push(jclone(a)); });
+          t.set(ref,{v:L,updatedAt:Date.now()}); out=L;
+        });
+      }).then(function(){ setPart(key,p,out); });
+    });
+  },Promise.resolve()).then(function(){
+    var ids={}; legacy.forEach(function(x){ids[x.id]=1;});
+    var ref=db.collection(COL).doc(key), out=null;
+    return db.runTransaction(function(t){
+      return t.get(ref).then(function(snap){
+        var L=(snap.exists&&Array.isArray(snap.data().v)?snap.data().v:[]).filter(function(y){ return !(y&&ids[y.id]); });
+        t.set(ref,{v:L,updatedAt:Date.now()}); out=L;
+      });
+    }).then(function(){ setPart(key,'',out); });
+  });
+}
+
 var DELTA_FIELDS={stock:1,looseOpen:1,paidAmount:1};
 function jclone(x){return x===undefined?undefined:JSON.parse(JSON.stringify(x));}
 function isIdArr(a){return Array.isArray(a)&&a.every(function(x){return x&&typeof x==='object'&&!Array.isArray(x)&&x.id!==undefined&&x.id!==null;});}
@@ -205,6 +307,7 @@ function applyObj(it,f){
   });
 }
 function save(k,v){
+  if(SHARD[k])return saveSharded(k,v);
   if(k==='cashier_products')syncLoose(v);
   var base=_base[k];
   if(base===undefined&&!(k in _dataCache)&&Array.isArray(defaultValueFor(k)))base=[];
@@ -255,57 +358,6 @@ function nextCounter(key,start){
     });
   }).then(function(n){ _dataCache[key]=n; return n; });
 }
-function adjustSafeBalance(delta,tx){
-  var sRef=db.collection(COL).doc('cashier_safe'), tRef=db.collection(COL).doc('cashier_safe_transactions');
-  var res={};
-  return db.runTransaction(function(t){
-    return Promise.all([t.get(sRef),t.get(tRef)]).then(function(r){
-      var safe=r[0].exists?(r[0].data().v||{balance:0}):{balance:0};
-      var txs=r[1].exists?(r[1].data().v||[]):[];
-      var nb=Math.round((num(safe.balance)+delta)*100)/100;
-      var rec=Object.assign({id:genId(),date:new Date().toISOString(),user:CURRENT_USER?CURRENT_USER.displayName:''},tx||{});
-      rec.amount=delta; rec.balanceAfter=nb; txs=txs.concat([rec]);
-      t.set(sRef,{v:{balance:nb},updatedAt:Date.now()});
-      t.set(tRef,{v:txs,updatedAt:Date.now()});
-      res={balance:nb,txs:txs};
-    });
-  }).then(function(){
-    _dataCache['cashier_safe']={balance:res.balance}; _dataCache['cashier_safe_transactions']=res.txs;
-    if(!modalOpen()&&currentTab==='safe')renderSafe();
-    return res.balance;
-  });
-}
-function adjustWalletBalance(wallet,delta,tx){
-  var wRef=db.collection(COL).doc('cashier_wallets'), tRef=db.collection(COL).doc('cashier_wallet_transactions');
-  var res={};
-  return db.runTransaction(function(t){
-    return Promise.all([t.get(wRef),t.get(tRef)]).then(function(r){
-      var w=r[0].exists?(r[0].data().v||{vodafone:0,instapay:0}):{vodafone:0,instapay:0};
-      var txs=r[1].exists?(r[1].data().v||[]):[];
-      w[wallet]=Math.round((num(w[wallet])+delta)*100)/100;
-      var rec=Object.assign({id:genId(),wallet:wallet,date:new Date().toISOString(),user:CURRENT_USER?CURRENT_USER.displayName:''},tx||{});
-      txs=txs.concat([rec]);
-      rec.balanceAfter=w[wallet]; t.set(wRef,{v:w,updatedAt:Date.now()}); t.set(tRef,{v:txs,updatedAt:Date.now()});
-      res={w:w,txs:txs};
-    });
-  }).then(function(){
-    _dataCache['cashier_wallets']=res.w; _dataCache['cashier_wallet_transactions']=res.txs;
-    if(!modalOpen()&&currentTab==='wallets')renderWallets();
-    return res.w;
-  });
-}
-
-db.collection(COL).onSnapshot(function(snap){
-  snap.docChanges().forEach(function(ch){
-    if(ch.type==='removed') delete _dataCache[ch.doc.id];
-    else if(!_pend[ch.doc.id]){ var d=ch.doc.data(); _dataCache[ch.doc.id]=d.v; _base[ch.doc.id]=jclone(d.v); }
-  });
-  if(_dataCache.cashier_products&&!_pend.cashier_products)syncLoose(_dataCache.cashier_products);
-  if(!DATA_READY && (!snap.metadata.fromCache || snap.size>0)) dataReady();
-  else if(DATA_READY) refreshCurrentView();
-},function(err){ console.error(err); dataReady(); });
-setTimeout(function(){ if(!DATA_READY) dataReady(); },15000);
-
 function dataReady(){
   if(DATA_READY)return; DATA_READY=true;
   $('loading').style.display='none';
@@ -405,7 +457,7 @@ function enterApp(){
   $('buildBadge').textContent='نسخة '+APP_BUILD;
   $('whoami').textContent='👤 '+CURRENT_USER.displayName+(isAdmin()?' (مدير)':' (كاشير)');
   $('safeRevealBtn').style.display=isAdmin()?'none':'inline-block';
-  buildTabs(); renderTab('cashier');
+  buildTabs(); renderTab('cashier'); setTimeout(maybeMigrate,800);
 }
 $('lgBuild').textContent='نسخة '+APP_BUILD;
 
@@ -416,7 +468,9 @@ function buildTabs(){
     return '<button class="tab'+(t.id===currentTab?' active':'')+'" onclick="renderTab(\''+t.id+'\')">'+t.icon+' '+t.label+c+'</button>';
   }).join('');
 }
-function refreshCurrentView(){
+var _rcvT=null;
+function refreshCurrentView(){ clearTimeout(_rcvT); _rcvT=setTimeout(_refreshNow,150); }
+function _refreshNow(){
   if(!CURRENT_USER||modalOpen())return;
   var a=document.activeElement;
   if(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&$('content').contains(a)){buildTabs();return;}
@@ -1196,7 +1250,7 @@ function resetAllData(){
   db.collection(COL).get().then(function(snap){
     var docs=snap.docs, chunks=[]; for(var i=0;i<docs.length;i+=400)chunks.push(docs.slice(i,i+400));
     return Promise.all(chunks.map(function(c){var b=db.batch(); c.forEach(function(d){b.delete(d.ref);}); return b.commit();}));
-  }).then(function(){ _dataCache={}; sessionStorage.removeItem('current_user'); alert('تم تصفير كل البيانات'); location.reload(); })
+  }).then(function(){ _dataCache={}; _parts={}; _owner={}; _pstr={}; sessionStorage.removeItem('current_user'); alert('تم تصفير كل البيانات'); location.reload(); })
   .catch(function(e){alert('فشل: '+e.message);});
 }
 
@@ -1253,25 +1307,6 @@ function expDesc(d){ return (d.category&&EXP_CATS[d.category]?EXP_CATS[d.categor
 
 /* ---------- transfers between safe / wallets / superpay ---------- */
 var ENDPOINTS={safe:'الخزنة الرئيسية',vodafone:'فودافون كاش',instapay:'انستاباي',superpay:'سوبر باي'};
-function spAdjust(delta,tx){
-  var bRef=db.collection(COL).doc('cashier_superpay'), tRef=db.collection(COL).doc('cashier_superpay_tx');
-  var res={};
-  return db.runTransaction(function(t){
-    return Promise.all([t.get(bRef),t.get(tRef)]).then(function(r){
-      var sp=r[0].exists?(r[0].data().v||{balance:0}):{balance:0};
-      var txs=r[1].exists?(r[1].data().v||[]):[];
-      var nb=Math.round((num(sp.balance)+delta)*100)/100;
-      var rec=Object.assign({id:genId(),date:new Date().toISOString(),user:me()},tx||{});
-      rec.amount=delta; rec.balanceAfter=nb; txs=txs.concat([rec]);
-      t.set(bRef,{v:{balance:nb},updatedAt:Date.now()});
-      t.set(tRef,{v:txs,updatedAt:Date.now()});
-      res={balance:nb,txs:txs};
-    });
-  }).then(function(){
-    _dataCache['cashier_superpay']={balance:res.balance}; _dataCache['cashier_superpay_tx']=res.txs;
-    return res.balance;
-  });
-}
 function moveFunds(from,to,amt,note){
   amt=r2(amt);
   var dn=note?' - '+note:'';
@@ -1578,41 +1613,6 @@ function addBundleToCart(id){
   else CART.push({productId:null,bundleId:id,name:'🎁 '+b.name,price:bundlePrice(b),costPrice:bundleCost(b),qty:1,components:b.items.map(function(c){var p=prodById(c.productId);return {productId:c.productId,name:p.name,qty:num(c.qty),price:num(p.price),costPrice:num(p.costPrice)};})});
   renderCart();
 }
-function processCheckout(){
-  if(checkoutBusy)return;
-  var sh=getOpenShift(); if(!sh){alert('افتح شيفت أولاً');return renderCashier();}
-  if(!CART.length){alert('الفاتورة فارغة');return;}
-  checkoutBusy=true;
-  var t=calcTotals(), items=CART.map(function(i){
-    var o={productId:i.productId,name:i.name,price:i.price,costPrice:i.costPrice,qty:num(i.qty)};
-    if(i.bundleId){o.bundleId=i.bundleId;o.components=i.components;}
-    return o;
-  });
-  var profit=r2(items.reduce(function(a,i){return a+(i.price-i.costPrice)*i.qty;},0)-t.discountAmount);
-  var pm=PAYM, custId=CUST_SEL, cust=null;
-  if(pm==='credit'){ cust=load('cashier_customers').filter(function(c){return c.id===custId;})[0]; if(!cust){alert('اختر العميل للبيع الآجل');checkoutBusy=false;return;} }
-  nextCounter('invoice_counter',1001).then(function(n){
-    var sale={id:genId(),invoiceNum:'INV-'+n,date:new Date().toISOString(),items:items,subtotal:t.subtotal,discountPercent:DISC,taxPercent:TAX,total:t.total,soldBy:me(),paymentMethod:pm,shiftId:sh.id,profit:profit};
-    if(cust){sale.customerId=cust.id;sale.customerName=cust.name;}
-    var pRef=db.collection(COL).doc('cashier_products'), sRef=db.collection(COL).doc('cashier_sales'), outP=null, outS=null;
-    var stockP=db.runTransaction(function(t){
-      return Promise.all([t.get(pRef),t.get(sRef)]).then(function(r){
-        var prods=r[0].exists&&Array.isArray(r[0].data().v)?r[0].data().v:[], sales=r[1].exists&&Array.isArray(r[1].data().v)?r[1].data().v:[];
-        items.forEach(function(i){
-          if(i.components){ i.components.forEach(function(c){ deductStock(prods,c.productId,num(c.qty)*i.qty); }); }
-          else deductStock(prods,i.productId,i.qty);
-        });
-        syncLoose(prods); sales.push(sale);
-        t.set(pRef,{v:prods,updatedAt:Date.now()}); t.set(sRef,{v:sales,updatedAt:Date.now()}); outP=prods; outS=sales;
-      });
-    }).then(function(){ _dataCache.cashier_products=outP; _base.cashier_products=jclone(outP); _dataCache.cashier_sales=outS; _base.cashier_sales=jclone(outS); });
-    var p=stockP.then(function(){ return (pm!=='cash'&&pm!=='credit')?adjustWalletBalance(pm,t.total,{operation:'sale',amount:t.total,commission:0,note:sale.invoiceNum}):null; });
-    return p.then(function(){return sale;});
-  }).then(function(sale){
-    CART=[];DISC=0;TAX=0;PAYM='cash';CUST_SEL=''; checkoutBusy=false; renderCashier(); showInvoice(sale);
-  }).catch(function(e){ checkoutBusy=false; alert('حدث خطأ أثناء البيع: '+e.message); });
-}
-
 /* ---------- item movement ---------- */
 var MV_Q='', MV_TYPE='';
 function buildMovements(){
@@ -2342,6 +2342,128 @@ function deleteLoose(id){
   if(open>0&&!confirm('فيه '+open+' وحدة في علبة مفتوحة، هتتحذف مع المنتج. متابعة؟'))return;
   save('cashier_products',load('cashier_products').filter(function(x){return x.id!==id;})); closeModal(); renderProducts();
 }
+
+
+function adjustSafeBalance(delta,tx){
+  var now=new Date().toISOString(), part=shardPart('cashier_safe_transactions',{date:now});
+  var sRef=db.collection(COL).doc('cashier_safe'), tRef=db.collection(COL).doc(shardDocId('cashier_safe_transactions',part));
+  var res={};
+  return db.runTransaction(function(t){
+    return Promise.all([t.get(sRef),t.get(tRef)]).then(function(r){
+      var safe=r[0].exists?(r[0].data().v||{balance:0}):{balance:0};
+      var txs=r[1].exists?(r[1].data().v||[]):[];
+      var nb=Math.round((num(safe.balance)+delta)*100)/100;
+      var rec=Object.assign({id:genId(),date:now,user:CURRENT_USER?CURRENT_USER.displayName:''},tx||{});
+      rec.amount=delta; rec.balanceAfter=nb; txs=txs.concat([rec]);
+      t.set(sRef,{v:{balance:nb},updatedAt:Date.now()});
+      t.set(tRef,{v:txs,updatedAt:Date.now()});
+      res={balance:nb,txs:txs};
+    });
+  }).then(function(){
+    _dataCache['cashier_safe']={balance:res.balance}; setPart('cashier_safe_transactions',part,res.txs);
+    if(!modalOpen()&&currentTab==='safe')renderSafe();
+    return res.balance;
+  });
+}
+function adjustWalletBalance(wallet,delta,tx){
+  var now=new Date().toISOString(), part=shardPart('cashier_wallet_transactions',{date:now});
+  var wRef=db.collection(COL).doc('cashier_wallets'), tRef=db.collection(COL).doc(shardDocId('cashier_wallet_transactions',part));
+  var res={};
+  return db.runTransaction(function(t){
+    return Promise.all([t.get(wRef),t.get(tRef)]).then(function(r){
+      var w=r[0].exists?(r[0].data().v||{vodafone:0,instapay:0}):{vodafone:0,instapay:0};
+      var txs=r[1].exists?(r[1].data().v||[]):[];
+      w[wallet]=Math.round((num(w[wallet])+delta)*100)/100;
+      var rec=Object.assign({id:genId(),wallet:wallet,date:now,user:CURRENT_USER?CURRENT_USER.displayName:''},tx||{});
+      txs=txs.concat([rec]);
+      rec.balanceAfter=w[wallet]; t.set(wRef,{v:w,updatedAt:Date.now()}); t.set(tRef,{v:txs,updatedAt:Date.now()});
+      res={w:w,txs:txs};
+    });
+  }).then(function(){
+    _dataCache['cashier_wallets']=res.w; setPart('cashier_wallet_transactions',part,res.txs);
+    if(!modalOpen()&&currentTab==='wallets')renderWallets();
+    return res.w;
+  });
+}
+function spAdjust(delta,tx){
+  var now=new Date().toISOString(), part=shardPart('cashier_superpay_tx',{date:now});
+  var bRef=db.collection(COL).doc('cashier_superpay'), tRef=db.collection(COL).doc(shardDocId('cashier_superpay_tx',part));
+  var res={};
+  return db.runTransaction(function(t){
+    return Promise.all([t.get(bRef),t.get(tRef)]).then(function(r){
+      var sp=r[0].exists?(r[0].data().v||{balance:0}):{balance:0};
+      var txs=r[1].exists?(r[1].data().v||[]):[];
+      var nb=Math.round((num(sp.balance)+delta)*100)/100;
+      var rec=Object.assign({id:genId(),date:now,user:me()},tx||{});
+      rec.amount=delta; rec.balanceAfter=nb; txs=txs.concat([rec]);
+      t.set(bRef,{v:{balance:nb},updatedAt:Date.now()});
+      t.set(tRef,{v:txs,updatedAt:Date.now()});
+      res={balance:nb,txs:txs};
+    });
+  }).then(function(){
+    _dataCache['cashier_superpay']={balance:res.balance}; setPart('cashier_superpay_tx',part,res.txs);
+    return res.balance;
+  });
+}
+
+
+function processCheckout(){
+  if(checkoutBusy)return;
+  var sh=getOpenShift(); if(!sh){alert('افتح شيفت أولاً');return renderCashier();}
+  if(!CART.length){alert('الفاتورة فارغة');return;}
+  checkoutBusy=true;
+  var t0=calcTotals(), items=CART.map(function(i){
+    var o={productId:i.productId,name:i.name,price:i.price,costPrice:i.costPrice,qty:num(i.qty)};
+    if(i.bundleId){o.bundleId=i.bundleId;o.components=i.components;}
+    return o;
+  });
+  var profit=r2(items.reduce(function(a,i){return a+(i.price-i.costPrice)*i.qty;},0)-t0.discountAmount);
+  var pm=PAYM, custId=CUST_SEL, cust=null;
+  if(pm==='credit'){ cust=load('cashier_customers').filter(function(c){return c.id===custId;})[0]; if(!cust){alert('اختر العميل للبيع الآجل');checkoutBusy=false;return;} }
+  var now=new Date().toISOString(), part=shardPart('cashier_sales',{date:now});
+  var cRef=db.collection(COL).doc('invoice_counter'), pRef=db.collection(COL).doc('cashier_products'), sRef=db.collection(COL).doc(shardDocId('cashier_sales',part));
+  var sale=null, outP=null, outS=null, outN=null;
+  db.runTransaction(function(t){
+    return Promise.all([t.get(cRef),t.get(pRef),t.get(sRef)]).then(function(r){
+      var n=(!r[0].exists||typeof r[0].data().v!=='number')?1001:r[0].data().v+1;
+      var prods=r[1].exists&&Array.isArray(r[1].data().v)?r[1].data().v:[], sales=r[2].exists&&Array.isArray(r[2].data().v)?r[2].data().v:[];
+      sale={id:genId(),invoiceNum:'INV-'+n,date:now,items:items,subtotal:t0.subtotal,discountPercent:DISC,taxPercent:TAX,total:t0.total,soldBy:me(),paymentMethod:pm,shiftId:sh.id,profit:profit};
+      if(cust){sale.customerId=cust.id;sale.customerName=cust.name;}
+      items.forEach(function(i){
+        if(i.components){ i.components.forEach(function(c){ deductStock(prods,c.productId,num(c.qty)*i.qty); }); }
+        else deductStock(prods,i.productId,i.qty);
+      });
+      syncLoose(prods); sales.push(sale);
+      t.set(cRef,{v:n,updatedAt:Date.now()}); t.set(pRef,{v:prods,updatedAt:Date.now()}); t.set(sRef,{v:sales,updatedAt:Date.now()});
+      outP=prods; outS=sales; outN=n;
+    });
+  }).then(function(){
+    _dataCache.invoice_counter=outN; _dataCache.cashier_products=outP; _base.cashier_products=jclone(outP); setPart('cashier_sales',part,outS);
+    return (pm!=='cash'&&pm!=='credit')?adjustWalletBalance(pm,t0.total,{operation:'sale',amount:t0.total,commission:0,note:sale.invoiceNum}):null;
+  }).then(function(){
+    CART=[];DISC=0;TAX=0;PAYM='cash';CUST_SEL=''; checkoutBusy=false; renderCashier(); showInvoice(sale);
+  }).catch(function(e){ checkoutBusy=false; alert('حدث خطأ أثناء البيع: '+e.message); });
+}
+
+
+db.collection(COL).onSnapshot(function(snap){
+  var dirty={};
+  snap.docChanges().forEach(function(ch){
+    var id=ch.doc.id, at=id.indexOf('@'), key=at>=0?id.slice(0,at):id, part=at>=0?id.slice(at+1):'';
+    if(SHARD[key]){
+      if(ch.type==='removed')dropPart(key,part);
+      else { var dd=ch.doc.data(); putPart(key,part,Array.isArray(dd.v)?dd.v:[]); }
+      dirty[key]=1; return;
+    }
+    if(ch.type==='removed') delete _dataCache[id];
+    else if(!_pend[id]){ var d=ch.doc.data(); _dataCache[id]=d.v; _base[id]=jclone(d.v); }
+  });
+  Object.keys(dirty).forEach(function(k){ if(!_pend[k])rebuild(k); });
+  if(_dataCache.cashier_products&&!_pend.cashier_products)syncLoose(_dataCache.cashier_products);
+  if(!DATA_READY && (!snap.metadata.fromCache || snap.size>0)) dataReady();
+  else if(DATA_READY){ refreshCurrentView(); maybeMigrate(); }
+},function(err){ console.error(err); dataReady(); });
+setTimeout(function(){ if(!DATA_READY) dataReady(); },15000);
 
 </script>
 </body>
